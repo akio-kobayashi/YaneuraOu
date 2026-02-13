@@ -58,11 +58,12 @@ py::list get_legal_moves_info(const std::string& sfen_str) {
     pos.set(sfen_str);
     
     MoveList<LEGAL_ALL> legal_moves_list(pos);
+    StateInfo st;
 
     for (const Move& move : legal_moves_list) {
-        pos.do_move(move);
+        pos.do_move(move, st);
         std::string after_sfen = pos.sfen();
-        pos.undo_move();
+        pos.undo_move(move);
 
         py::dict move_info;
         move_info["from"] = square_to_str(move.from());
