@@ -1,9 +1,41 @@
 
+# ======================================================================
+# やねうら王ビルドガイド (LayerStack / Bucketing 対応版)
+# ======================================================================
+#
+# 【LayerStack (Bucketing) の設定方法】
+# 局面の進行度（駒の数）に応じて複数のネットワークを切り替えるには以下を確認してください：
+#
+# 1. アーキテクチャの選択:
+#    YANEURAOU_EDITION で使用する NNUE アーキテクチャを選択します。
+#    各アーキテクチャの定義 (source/eval/nnue/architectures/*.h) 内で
+#    'LayerStacks' が 1 より大きく設定されている必要があります（例: 8）。
+#
+# 2. バケット切り替えロジック:
+#    どの局面でどのバケットを使うかは、以下の関数で定義されています：
+#    source/eval/nnue/evaluate_nnue.cpp : stack_index_for_nnue()
+#    ※ 現状は駒の価値の合計（進行度）に基づいて分割されています。
+#
+# 3. 評価関数ファイル (nn.bin):
+#    LayerStacks で指定した数だけネットワークの重みが並んだ nn.bin が必要です。
+#
+# ======================================================================
+
 # === ビルドターゲット (build target) ===
 
 # normal     : 通常使用版(配布用の実行ファイルはこちら)
 # evallearn  : 教師局面からの学習用
 # tournament : 大会で使う用(通常版よりややEloが高いが使える機能に制限がある)
+
+# --- 基本的なビルド設定についての補足 ---
+# 1. YANEURAOU_EDITION:
+#    プログラムの「脳（評価関数の構造）」を決定します。
+#    詳細は冒頭の【LayerStack の設定方法】を参照してください。
+#
+# 2. TARGET_CPU:
+#    計算速度に直結します。実行マシンのCPUがサポートする最上位の命令セットを選択してください。
+#    ※ 不適切な指定（CPUが未対応の命令）をすると、実行時にクラッシュします。
+#    AMD Ryzenの場合は ZEN1/ZEN2/ZEN3 等の専用オプションでさらに高速化可能です。
 
 # === ビルドオプション (build options) ===
 
@@ -116,6 +148,10 @@ PYTHON = python
 
 
 # 標準的なコンパイルオプション (standard compile options)
+# -fno-exceptions / -fno-rtti:
+#   例外処理(try-catch)と実行時型情報(dynamic_cast等)を無効化します。
+#   将棋エンジンのような極限まで速度を求めるプログラムでは、これらをオフに
+#   することでバイナリサイズを削減し、実行効率を高めるのが標準的です。
 CPPFLAGS      = -std=c++17 -fno-exceptions -fno-rtti -Wextra -MMD -MP -fpermissive
 NVCC_CPPFLAGS = -std=c++17 -x cu -maxrregcount=0 --machine 64 --compile -cudart static -DNDEBUG -Xcompiler "-Ofast"
 WCPPFLAGS     =
@@ -247,6 +283,10 @@ else
 endif
 
 # リンク時最適化。
+# --- リンク時最適化 (LTO: Link Time Optimization) ---
+# 複数のソースファイルにまたがる最適化を可能にします。
+# これを有効にするとビルド時間は大幅に伸びますが、インライン展開が
+# 効率化されるため、実行速度がさらに数%向上します。
 # CPPFLAGSとLDFLAGSの両方で-fltoを指定する必要がある。
 # cf. https://gcc.gnu.org/onlinedocs/gcc-6.3.0/gcc/Optimize-Options.html#Optimize-Options
 LTOFLAGS = -flto

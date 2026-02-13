@@ -242,13 +242,13 @@ namespace {
 		// 評価関数パラメータを初期化する
 		void Initialize() {
 			Detail::Initialize<FeatureTransformer>(feature_transformer);
-#if defined(SFNNwoPSQT)
-			for (int i = 0; i < kLayerStacks; ++i) {
-				Detail::Initialize<Network>(network[i]);
+			if (kLayerStacks > 1) {
+				for (int i = 0; i < kLayerStacks; ++i) {
+					Detail::Initialize<Network>(network[i]);
+				}
+			} else {
+				Detail::Initialize<Network>(network);
 			}
-#else
-			Detail::Initialize<Network>(network);
-#endif
 		}
 	
 		}  // namespace
@@ -303,21 +303,21 @@ namespace {
     			sync_cout << "info string NNUE feature params read failed: " << result.to_string() << sync_endl;
     			return result;
     		}
-#if defined(SFNNwoPSQT)
-    		for (int i = 0; i < kLayerStacks; ++i) {
-    			result = Detail::ReadParameters<Network>(stream, network[i]);
-    			if (result.is_not_ok()) {
-    				sync_cout << "info string NNUE network params read failed at stack " << i << ": " << result.to_string() << sync_endl;
-    				return result;
-    			}
-    		}
-#else
-    		result = Detail::ReadParameters<Network>(stream, network);
-    		if (result.is_not_ok()) {
-    			sync_cout << "info string NNUE network params read failed: " << result.to_string() << sync_endl;
-    			return result;
-    		}
-#endif
+			if (kLayerStacks > 1) {
+				for (int i = 0; i < kLayerStacks; ++i) {
+					result = Detail::ReadParameters<Network>(stream, network[i]);
+					if (result.is_not_ok()) {
+						sync_cout << "info string NNUE network params read failed at stack " << i << ": " << result.to_string() << sync_endl;
+						return result;
+					}
+				}
+			} else {
+				result = Detail::ReadParameters<Network>(stream, network);
+				if (result.is_not_ok()) {
+					sync_cout << "info string NNUE network params read failed: " << result.to_string() << sync_endl;
+					return result;
+				}
+			}
 
     		if (stream && stream.peek() == std::ios::traits_type::eof())
     			return Tools::ResultCode::Ok;
@@ -328,13 +328,13 @@ namespace {
     bool WriteParameters(std::ostream& stream) {
         if (!WriteHeader(stream, kHashValue, GetArchitectureString())) return false;
         if (!Detail::WriteParameters<FeatureTransformer>(stream, feature_transformer)) return false;
-#if defined(SFNNwoPSQT)
-        for (int i = 0; i < kLayerStacks; ++i) {
-            if (!Detail::WriteParameters<Network>(stream, network[i])) return false;
-        }
-#else
-        if (!Detail::WriteParameters<Network>(stream, network)) return false;
-#endif
+		if (kLayerStacks > 1) {
+			for (int i = 0; i < kLayerStacks; ++i) {
+				if (!Detail::WriteParameters<Network>(stream, network[i])) return false;
+			}
+		} else {
+			if (!Detail::WriteParameters<Network>(stream, network)) return false;
+		}
         return !stream.fail();
     }
 
@@ -343,22 +343,21 @@ namespace {
         feature_transformer->UpdateAccumulatorIfPossible(pos);
     }
 
-#if defined(SFNNwoPSQT)
-    // レイヤースタックの選択。双方の玉の段に応じて9通りに分岐させる。
+    // レイヤースタックの選択。
+    // 駒の価値の合計（進行度）に応じて分岐させる。
     static int stack_index_for_nnue(const Position& pos) {
-        constexpr int kFToIndex[] = { 0, 0, 0, 3, 3, 3, 6, 6, 6 };
-        constexpr int kEToIndex[] = { 0, 0, 0, 1, 1, 1, 2, 2, 2 };
-        const auto stm = pos.side_to_move();
-        const auto f_king = pos.square<KING>(stm);
-        const auto e_king = pos.square<KING>(~stm);
-        const auto f_rank = stm == BLACK ? rank_of(f_king) : rank_of(Inv(f_king));
-        const auto e_rank = stm == BLACK ? rank_of(Inv(e_king)) : rank_of(e_king);
-        int idx = kFToIndex[f_rank] + kEToIndex[e_rank];
+        // 歩以外の駒の合計価値
+        const Value npm = pos.non_pawn_material();
+
+        // npmは概ね 0 〜 14000 程度の範囲。
+        // これを kLayerStacks 個のバケットに等間隔で分割する。
+        // (16384を基準に計算)
+        int idx = (16384 - (int)npm) * kLayerStacks / 16384;
+
         if (idx < 0) idx = 0;
         if (idx >= kLayerStacks) idx = kLayerStacks - 1;
         return idx;
     }
-#endif
 
     // 評価値を計算する
     static Value ComputeScore(const Position& pos, bool refresh = false) {
@@ -371,12 +370,10 @@ namespace {
             transformed_features[FeatureTransformer::kBufferSize];
         feature_transformer->Transform(pos, transformed_features, refresh);
         alignas(kCacheLineSize) char buffer[Network::kBufferSize];
-#if defined(SFNNwoPSQT)
-        const auto bucket = stack_index_for_nnue(pos);
-        const auto output = network[bucket]->Propagate(transformed_features, buffer);
-#else
-        const auto output = network->Propagate(transformed_features, buffer);
-#endif
+
+        const auto output = kLayerStacks > 1
+            ? network[stack_index_for_nnue(pos)]->Propagate(transformed_features, buffer)
+            : network->Propagate(transformed_features, buffer);
 
         // VALUE_MAX_EVALより大きな値が返ってくるとaspiration searchがfail highして
         // 探索が終わらなくなるのでVALUE_MAX_EVAL以下であることを保証すべき。

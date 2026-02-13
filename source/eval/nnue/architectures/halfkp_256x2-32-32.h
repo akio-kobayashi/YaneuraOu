@@ -23,6 +23,9 @@ using RawFeatures = Features::FeatureSet<
 // 変換後の入力特徴量の次元数
 constexpr IndexType kTransformedFeatureDimensions = 256;
 
+// Number of networks stored in the evaluation file
+constexpr int LayerStacks = 8;
+
 namespace Layers {
 
 // Define network structure
