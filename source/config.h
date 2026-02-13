@@ -203,7 +203,7 @@
 // 評価関数を教師局面から学習させるときに使うときのモード
 // "learn"コマンドが使えるようになる。(教師局面からの評価関数パラメーターの学習ができるようになる。)
 // "gensfen"コマンドも使えるようになる。(教師局面の生成もできるようになる。)
-//#define EVAL_LEARN
+#define EVAL_LEARN
 
 
 // sfenを256bitにpackする機能、unpackする機能を有効にする。
@@ -585,6 +585,16 @@ constexpr int MAX_PLY_NUM = 246;
 // 正しく計算できない。そのため、EVAL_HASHを動的に無効化するためのオプションを用意する。
 #if defined(EVAL_LEARN)
 	#define USE_GLOBAL_OPTIONS
+#endif
+
+#if defined(USE_GLOBAL_OPTIONS)
+namespace YaneuraOu {
+struct GlobalOptionsStruct {
+	bool use_eval_hash = true;
+	bool use_hash_probe = true;
+};
+inline GlobalOptionsStruct GlobalOptions;
+}  // namespace YaneuraOu
 #endif
 
 // --------------------

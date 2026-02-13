@@ -4,7 +4,13 @@
 namespace YaneuraOu {
 
 Search::Worker::Worker(
-	OptionsMap& options, ThreadPool& threads, size_t threadIdx, NumaReplicatedAccessToken numaAccessToken
+	OptionsMap& options,
+	ThreadPool& threads,
+	size_t threadIdx,
+	NumaReplicatedAccessToken numaAccessToken,
+	Position& rootPosRef,
+	StateInfo& rootStateRef,
+	RootMoves& rootMovesRef
 	/*
 						SharedState&                    sharedState,
                         std::unique_ptr<ISearchManager> sm,
@@ -19,7 +25,10 @@ Search::Worker::Worker(
 	options(options),
 	threads(threads),
 	threadIdx(threadIdx),
-    numaAccessToken(numaAccessToken)
+    numaAccessToken(numaAccessToken),
+	rootPos(rootPosRef),
+	rootState(rootStateRef),
+	rootMoves(rootMovesRef)
 
 	#if 0
     manager(std::move(sm)),
@@ -54,4 +63,3 @@ void Search::Worker::ensure_network_replicated() {
 
 
 } // namespace YaneuraOu
-

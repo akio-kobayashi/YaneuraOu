@@ -310,13 +310,23 @@ struct UpdateContext {
 */
 
 class Worker;
-typedef std::function<std::unique_ptr<Worker>(size_t /*threadIdx*/, NumaReplicatedAccessToken /*numaAccessToken*/)> WorkerFactory;
+typedef std::function<std::unique_ptr<Worker>(size_t /*threadIdx*/,
+                                              NumaReplicatedAccessToken /*numaAccessToken*/,
+                                              Position& /*rootPos*/,
+                                              StateInfo& /*rootState*/,
+                                              RootMoves& /*rootMoves*/)> WorkerFactory;
 
 class Worker
 {
 public:
 
-	Worker(OptionsMap& options, ThreadPool& threads, size_t threadIdx, NumaReplicatedAccessToken numaAccessToken);
+	Worker(OptionsMap& options,
+           ThreadPool& threads,
+           size_t threadIdx,
+           NumaReplicatedAccessToken numaAccessToken,
+           Position& rootPos,
+           StateInfo& rootState,
+           RootMoves& rootMoves);
 
 	// Called at instantiation to initialize reductions tables.
     // Reset histories, usually before a new game.
@@ -435,13 +445,13 @@ protected:
 public:
 
 	// 探索開始局面
-    Position rootPos;
+    Position& rootPos;
 
     // rootPosに対するStateInfo
-    StateInfo rootState;
+    StateInfo& rootState;
 
     // Rootの指し手
-    RootMoves rootMoves;
+    RootMoves& rootMoves;
 
 protected:
 
@@ -537,4 +547,3 @@ struct SharedState {
 
 
 #endif // SEARCH_H_INCLUDED
-

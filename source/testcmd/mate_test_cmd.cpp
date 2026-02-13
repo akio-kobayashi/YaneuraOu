@@ -129,7 +129,7 @@ namespace {
 					StateInfo si;
 					Position newPos;
 					string sfen = pos.sfen();
-					newPos.set(sfen, &si, pos.this_thread());
+					newPos.set(sfen, &si);
 
 					// mate_min_ply - 2で詰まなくて、
 					// mate_max_plyで詰むことを確認すれば良いはず。

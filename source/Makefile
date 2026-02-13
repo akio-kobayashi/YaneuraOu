@@ -66,7 +66,7 @@ YANEURAOU_EDITION = YANEURAOU_ENGINE_NNUE
 #TARGET_CPU = AVX512VNNI
 #TARGET_CPU = AVX512
 #TARGET_CPU = AVXVNNI
-TARGET_CPU = AVX2
+#TARGET_CPU = AVX2
 #TARGET_CPU = SSE42
 #TARGET_CPU = SSE41
 #TARGET_CPU = SSSE3
@@ -84,7 +84,7 @@ TARGET_CPU = AVX2
 #TARGET_CPU = APPLEAVX2
 #TARGET_CPU = APPLESSE42
 # -- macOS for M1/M2/M3
-#TARGET_CPU = APPLEM1
+TARGET_CPU = APPLEM1
 
 
 # デバッガーを使用するか (debugger)
@@ -114,12 +114,14 @@ PYTHON = python
 
 
 # 標準的なコンパイルオプション (standard compile options)
-CPPFLAGS      = -std=c++17 -fno-exceptions -fno-rtti -Wextra -MMD -MP -fpermissive
-NVCC_CPPFLAGS = -std=c++17 -x cu -maxrregcount=0 --machine 64 --compile -cudart static -DNDEBUG -Xcompiler "-Ofast"
+#CPPFLAGS      = -std=c++17 -fno-exceptions -fno-rtti -Wextra -MMD -MP -fpermissive
+CPPFLAGS      = -std=c++17 -fno-exceptions -fno-rtti -Wextra -MMD -MP -fpermissive -Ofast -mcpu=apple-m2 -ftree-vectorize -DNDEBUG -march=native -ffp-contract=fast -pthread
+#NVCC_CPPFLAGS = -std=c++17 -x cu -maxrregcount=0 --machine 64 --compile -cudart static -DNDEBUG -Xcompiler "-Ofast"
+NVCC_CPPFLAGS =
 WCPPFLAGS     =
-LDFLAGS       = 
+LDFLAGS       = -flto -pthread
 LIBS          =
-INCLUDE       = # -I../include
+INCLUDE       = -I./src -I./include # -I../include
 
 # makeするときにCPPFLAGS,LDFLAGSを追加で指定したいときはこれを用いる。
 EXTRA_CPPFLAGS =
@@ -240,7 +242,7 @@ else
 		TARGET = $(TARGETDIR)/YaneuraOu-by-gcc.exe
 	else
 		CPPFLAGS += -D_LINUX
-		TARGET = $(TARGETDIR)/YaneuraOu-by-gcc
+		TARGET = $(TARGETDIR)/YaneuraOu-apple_m2
 	endif
 endif
 

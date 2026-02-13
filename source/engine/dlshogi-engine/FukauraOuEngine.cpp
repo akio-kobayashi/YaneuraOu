@@ -204,9 +204,12 @@ FukauraOuWorker::FukauraOuWorker(OptionsMap&               options,
                                  ThreadPool&               threads,
                                  size_t                    threadIdx,
                                  NumaReplicatedAccessToken numaAccessToken,
+                                 Position&                 rootPos,
+                                 StateInfo&                rootState,
+                                 Search::RootMoves&        rootMoves,
                                  DlshogiSearcher&          searcher,
                                  FukauraOuEngine&          engine) :
-    Worker(options, threads, threadIdx, numaAccessToken),
+    Worker(options, threads, threadIdx, numaAccessToken, rootPos, rootState, rootMoves),
     searcher(searcher),
     engine(engine) {}
 

@@ -78,6 +78,40 @@ using GetThreadSelectedCpuSetMasks_t = BOOL (*)(HANDLE, PGROUP_AFFINITY, USHORT,
 
 namespace YaneuraOu {
 
+namespace WinProcGroup {
+
+inline void bindThisThread(size_t thread_id) {
+#if defined(_WIN64)
+    const WORD groupCount = GetActiveProcessorGroupCount();
+
+    // If there is only a single processor group, binding is unnecessary.
+    if (groupCount <= 1)
+        return;
+
+    const size_t processorsPerGroup = WIN_PROCESSOR_GROUP_SIZE;
+    const WORD targetGroup = static_cast<WORD>(
+        std::min<size_t>(thread_id / processorsPerGroup, groupCount - 1));
+
+    const DWORD processorsInGroup = GetActiveProcessorCount(targetGroup);
+    if (processorsInGroup == 0)
+        return;
+
+    size_t idxWithinGroup = thread_id % processorsPerGroup;
+    if (idxWithinGroup >= processorsInGroup && processorsInGroup != 0)
+        idxWithinGroup %= processorsInGroup;
+
+    GROUP_AFFINITY affinity{};
+    affinity.Group = targetGroup;
+    affinity.Mask  = KAFFINITY(1) << idxWithinGroup;
+
+    SetThreadGroupAffinity(GetCurrentThread(), &affinity, nullptr);
+#else
+    (void)thread_id;
+#endif
+}
+
+}  // namespace WinProcGroup
+
 using CpuIndex  = size_t;
 using NumaIndex = size_t;
 

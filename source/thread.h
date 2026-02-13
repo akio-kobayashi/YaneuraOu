@@ -15,10 +15,10 @@
 #include "thread_win32_osx.h"
 //#include "types.h"
 #include "history.h"
+#include "tt.h"
 
 #if defined(EVAL_LEARN)
 // 学習用の実行ファイルでは、スレッドごとに置換表を持ちたい。
-#include "tt.h"
 #endif
 
 namespace YaneuraOu {
@@ -92,7 +92,11 @@ private:
 
 namespace Search {
 	class Worker;
-	typedef std::function<std::unique_ptr<Worker>(size_t /*thread_idx*/, NumaReplicatedAccessToken /*token*/)> WorkerFactory;
+	typedef std::function<std::unique_ptr<Worker>(size_t /*thread_idx*/,
+                                                  NumaReplicatedAccessToken /*token*/,
+                                                  Position&,
+                                                  StateInfo&,
+                                                  RootMoves&)> WorkerFactory;
 }
 
 class Thread {
@@ -162,6 +166,11 @@ public:
 	// 実行しているjob
 	std::function<void()>           jobFunc;
 
+#if defined(EVAL_LEARN)
+	// 学習のときはスレッドごとに置換表を持つ。
+	TranspositionTable tt;
+#endif
+
 private:
 	// exitフラグやsearchingフラグの状態を変更するときのmutex
 	std::mutex                mutex;
@@ -189,6 +198,12 @@ private:
 
 	// このスレッドおよび評価関数パラメーターが、どのNUMAに属するか。
 	NumaReplicatedAccessToken numaAccessToken;
+
+public:
+	// Legacy-accessible root data used by helper tools.
+	Position                  rootPos;
+	StateInfo                 rootState;
+	Search::RootMoves         rootMoves;
 };
 
 // 思考で用いるスレッドの集合体
@@ -204,6 +219,10 @@ private:
 class ThreadPool {
 public:
 	ThreadPool() {}
+
+    // Compatibility helper to access threads by index like a vector.
+    Thread* operator[](size_t idx) { return threads[idx].get(); }
+    const Thread* operator[](size_t idx) const { return threads[idx].get(); }
 
 	~ThreadPool() {
 		// destroy any existing thread(s)
@@ -248,7 +267,8 @@ public:
 #else
              const OptionsMap&            options,
              size_t                       requested_threads,
-             const Search::WorkerFactory& worker_factory);
+             const Search::WorkerFactory& worker_factory,
+			 TranspositionTable*          tt = nullptr);
 #endif
     /*
 	   💡 Stockfishでは、
@@ -275,6 +295,7 @@ public:
 
 	// mainスレッドを取得する。これはthis[0]がそう。
     Thread* main_thread() const { return threads.front().get(); }
+	Thread* main() const { return main_thread(); }
 
 	// 今回、goコマンド以降に探索したノード数
     // →　これはPosition::do_move()を呼び出した回数。
@@ -338,7 +359,7 @@ private:
 
 	// Threadクラスの特定のメンバー変数を足し合わせたものを返す。
 	// 💡 nodesの集計に用いる。
-	uint64_t accumulate(std::atomic<uint64_t> Search::Worker::* member) const {
+uint64_t accumulate(std::atomic<uint64_t> Search::Worker::* member) const {
 
 		uint64_t sum = 0;
 		for (auto&& th : threads)
@@ -346,6 +367,9 @@ private:
 		return sum;
 	}
 };
+
+// Global thread pool instance used by legacy components (learner, book tools, etc.).
+extern ThreadPool Threads;
 
 } // namespace YaneuraOu
 

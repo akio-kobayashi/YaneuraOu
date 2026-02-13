@@ -13,6 +13,12 @@
 
 namespace YaneuraOu {
 
+#if defined(EVAL_LEARN)
+// 学習時に評価関数ファイルなどを読み込むときにエンジンオプションの値が欲しいことがあるので
+// グローバルなOptionsとして公開する。
+extern OptionsMap Options;
+#endif
+
 // --------------------
 //     USI関連
 // --------------------

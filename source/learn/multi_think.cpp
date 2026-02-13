@@ -12,12 +12,12 @@ namespace YaneuraOu {
 
 void MultiThink::go_think()
 {
-	// あとでOptionsの設定を復元するためにコピーで保持しておく。
-	auto oldOptions = Options;
+	// あとでOptionsの設定を復元するために値を保持しておく。
+	auto oldBookOnTheFly = std::string(Options["BookOnTheFly"]);
 
 	// 定跡を用いる場合、on the flyで行なうとすごく時間がかかる＆ファイルアクセスを行なう部分が
 	// thread safeではないので、メモリに丸読みされている状態であることをここで保証する。
-	Options["BookOnTheFly"] = std::string("false");
+	Options.set_option_if_exists("BookOnTheFly", "false");
 
 	// 評価関数の読み込み等
 	// learnコマンドの場合、評価関数読み込み後に評価関数の値を補正している可能性があるので、
@@ -115,9 +115,7 @@ void MultiThink::go_think()
 	std::cout << "all threads are joined." << std::endl;
 
 	// Optionsを書き換えたので復元。
-	// 値を代入しないとハンドラが起動しないのでこうやって復元する。
-	for (auto& s : oldOptions)
-		Options[s.first] = std::string(s.second);
+	Options.set_option_if_exists("BookOnTheFly", oldBookOnTheFly);
 
 }
 

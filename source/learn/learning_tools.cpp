@@ -6,6 +6,7 @@
 #include <omp.h>
 #endif
 #include "../misc.h"
+#include "../numa.h"
 
 namespace YaneuraOu {
 namespace EvalLearningTools {

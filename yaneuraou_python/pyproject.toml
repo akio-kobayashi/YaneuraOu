@@ -1,0 +1,17 @@
+[build-system]
+requires = ["scikit-build-core", "pybind11"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "yaneuraou-python"
+version = "0.1.0"
+description = "A Python toolkit for the YaneuraOu shogi engine, including a C++ wrapper and utility scripts."
+readme = "README.md"
+license = { text = "GPL-3.0-only" }
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+]
+
+[tool.scikit-build]
+cmake.version = ">=3.15"

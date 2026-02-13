@@ -73,11 +73,15 @@ void DlshogiSearcher::InitGPU(const std::string& model_path , std::vector<int> t
 		💡 やねうら王のThreadPoolクラスは、前回と異なるスレッド数であれば自動的に再確保される。
 	*/ 
 
-    auto worker_factory = [&](size_t threadIdx, NumaReplicatedAccessToken numaAccessToken) {
+    auto worker_factory = [&](size_t threadIdx,
+                              NumaReplicatedAccessToken numaAccessToken,
+                              Position& rootPos,
+                              StateInfo& rootState,
+                              Search::RootMoves& rootMoves) {
             return std::make_unique<FukauraOuWorker>(
 
               // Worker基底classが渡して欲しいもの。
-              engine.options, engine.threads, threadIdx, numaAccessToken,
+              engine.options, engine.threads, threadIdx, numaAccessToken, rootPos, rootState, rootMoves,
 
               // 追加でFukauraOuEngineからもらいたいもの
               *this, engine);

@@ -21,6 +21,7 @@
 
 // 学習用のevaluate絡みのheader
 #include "../eval/evaluate_common.h"
+#include "../evaluate.h"
 
 // ----------------------
 // 設定内容に基づく定数文字列
@@ -67,6 +68,8 @@
 #include "../tt.h"
 #include "../mate/mate.h"
 #include "multi_think.h"
+#include "../usi.h"
+#include "../testcmd/unit_test.h"
 
 #if defined(EVAL_NNUE)
 #include "../eval/nnue/evaluate_nnue_learner.h"
@@ -76,8 +79,13 @@
 using namespace std;
 namespace YaneuraOu {
 
+void is_ready([[maybe_unused]] bool silent) {
+	// 評価関数の読み込みや初期化はここで呼び出す
+	Eval::load_eval();
+}
+
 // これは探索部で定義されているものとする。
-extern Book::BookMoveSelector book;
+Book::BookMoveSelector book;
 
 // atomic<T>に対する足し算、引き算の定義
 // Apery/learner.hppにあるatomicAdd()に合わせてある。
@@ -98,8 +106,66 @@ T operator -= (std::atomic<T>& x, const T rhs) { return x += -rhs; }
 namespace Learner
 {
 
+ValuePV search(Position& pos, int depth , size_t multiPV, u64 nodesLimit);
+ValuePV qsearch(Position& pos);
+void UnitTest(Test::UnitTester& tester);
+void UnitTest(Test::UnitTester& tester);
+
 // 局面の配列 : PSVector は packed sfen vector の略。
 typedef std::vector<PackedSfenValue> PSVector;
+
+ValuePV search(Position& pos, int depth, size_t multiPV, u64 nodesLimit) {
+	multiPV = std::max<size_t>(1, multiPV);
+
+	// MultiPV設定を退避しておく。
+	const std::string oldMultiPV = std::string(Options["MultiPV"]);
+	Options.set_option_if_exists("MultiPV", std::to_string(multiPV));
+
+	Search::LimitsType limits;
+	limits.depth = std::max(0, depth);
+	limits.nodes = nodesLimit;
+
+	auto states = StateListPtr(new std::deque<StateInfo>(1));
+	if (pos.state() != nullptr)
+		(*states)[0] = *pos.state();
+	else
+		std::memset(&(*states)[0], 0, sizeof(StateInfo));
+
+	Threads.start_thinking(Options, pos, states, limits);
+	Threads.wait_for_search_finished();
+
+	const auto* mainThread = Threads.main_thread();
+	const auto& rootMoves = mainThread->worker->rootMoves;
+
+	Value bestValue = VALUE_ZERO;
+	std::vector<Move> pv;
+	if (!rootMoves.empty())
+	{
+		bestValue = rootMoves.front().score;
+		for (auto move : rootMoves.front().pv)
+		{
+			if (!move.is_ok())
+				break;
+			pv.push_back(move);
+		}
+	}
+
+	Options.set_option_if_exists("MultiPV", oldMultiPV);
+	return { bestValue, pv };
+}
+
+ValuePV qsearch(Position& pos) { return search(pos, 0, 1, 0); }
+
+void UnitTest(Test::UnitTester& tester) {
+	auto section = tester.section("Learner");
+	Position pos;
+	StateInfo si;
+	pos.set_hirate(&si);
+	const auto result = search(pos, 1, 1, 0);
+	tester.test("Learner search returns value", true);
+	if (!result.second.empty())
+		tester.test("Learner search returns pv", result.second.front().is_ok());
+}
 
 // -----------------------------------
 //    局面のファイルへの書き出し
@@ -384,10 +450,11 @@ void MultiThinkGenSfen::thread_worker(size_t thread_id)
 		pos.set_hirate(&si);
 
 		// 自分スレッド用の置換表があるはずなので自分の置換表だけをクリアする。
-		th->tt.clear();
+		th->tt.clear(Threads);
 
 		// 探索部で定義されているBookMoveSelectorのメンバを参照する。
 		auto& book = YaneuraOu::book;
+		const Search::UpdateContext noUpdates{};
 
 		// 1局分の局面を保存しておき、終局のときに勝敗を含めて書き出す。
 		// 書き出す関数は、この下にあるflush_psv()である。
@@ -503,7 +570,7 @@ void MultiThinkGenSfen::thread_worker(size_t thread_id)
 			}
 
 			// 定跡
-			if ((m = book.probe(pos)) != Move::none())
+			if (auto probe = book.probe(pos, noUpdates); (m = probe.bestmove) != Move::none())
 			{
 				// 定跡にhitした。
 				// その指し手はmに格納された。
@@ -600,7 +667,7 @@ void MultiThinkGenSfen::thread_worker(size_t thread_id)
 						// 非合法手はやってこないはずなのだが。
 						// 宣言勝ちとmated()でないことは上でテストしているので
 						// 読み筋としてMOVE_WINとMOVE_RESIGNが来ないことは保証されている。(はずだが…)
-						if (!pos.pseudo_legal(m) || !pos.legal(m))
+						if (!pos.pseudo_legal(m, false) || !pos.legal(m))
 						{
 							cout << "Error! : " << pos.sfen() << m << endl;
 						}
@@ -770,7 +837,7 @@ void MultiThinkGenSfen::thread_worker(size_t thread_id)
 					Learner::search(pos, random_multi_pv_depth, random_multi_pv);
 					// rootMovesの上位N手のなかから一つ選択
 
-					auto& rm = pos.this_thread()->rootMoves;
+					auto& rm = th->rootMoves;
 
 					u64 s = min((u64)rm.size(), (u64)random_multi_pv);
 					for (u64 i = 1; i < s; ++i)
@@ -1215,7 +1282,7 @@ struct SfenReader
 
 			// hash keyを求める。
 			StateInfo si;
-			if (pos.set_from_packed_sfen(ps.sfen, &si, th).is_not_ok())
+				if (pos.set_from_packed_sfen(ps.sfen, &si).is_not_ok())
 			{
 				// 運悪くrmse計算用のsfenとして、不正なsfenを引いてしまっていた。
 				cout << "Error! : illegal packed sfen " << pos.sfen() << endl;
@@ -1674,7 +1741,7 @@ void LearnerThink::calc_loss(size_t thread_id, u64 done)
 				auto& pos = th->rootPos;
 				StateInfo si;
 				auto& ps = sr.sfen_for_mse[position_index];
-				if (pos.set_from_packed_sfen(ps.sfen, &si, th).is_not_ok())
+				if (pos.set_from_packed_sfen(ps.sfen, &si).is_not_ok())
 				{
 					// 運悪くrmse計算用のsfenとして、不正なsfenを引いてしまっていた。
 					cout << "Error! : illegal packed sfen " << pos.sfen() << endl;
@@ -1980,7 +2047,7 @@ void LearnerThink::thread_worker(size_t thread_id)
 		// ↑sfenを経由すると遅いので専用の関数を作った。
 		StateInfo si;
 		const bool mirror = prng.rand(100) < mirror_percentage;
-		if (pos.set_from_packed_sfen(ps.sfen,&si,th,mirror).is_not_ok())
+		if (pos.set_from_packed_sfen(ps.sfen, &si, mirror, 0).is_not_ok())
 		{
 			// 変なsfenを掴かまされた。デバッグすべき！
 			// 不正なsfenなのでpos.sfen()で表示できるとは限らないが、しないよりマシ。
@@ -2020,7 +2087,7 @@ void LearnerThink::thread_worker(size_t thread_id)
 			// qsearch()を1000回呼び出すごとに置換表をクリアする。
 			// qsearch()で汚れる置換表はたかだか知れてるとは思うが、
 			// 定期的にクリアはしたほうが良いと思われる。
-			th->tt.clear();
+			th->tt.clear(Threads);
 		}
 
 		auto pv = r.second;
@@ -2109,7 +2176,7 @@ void LearnerThink::thread_worker(size_t thread_id)
 		for (auto m : pv)
 		{
 			// 非合法手はやってこないはずなのだが。
-			if (!pos.pseudo_legal(m) || !pos.legal(m))
+			if (!pos.pseudo_legal(m, false) || !pos.legal(m))
 			{
 				cout << pos << m << endl;
 				ASSERT_LV3(false);
@@ -2450,6 +2517,7 @@ void convert_bin(const vector<string>& filenames , const string& output_file_nam
 	std::fstream fs;
 	auto th = Threads.main();
 	auto &tpos = th->rootPos;
+	auto &tstate = th->rootState;
 	// plain形式の雑巾をやねうら王用のpackedsfenvalueに変換する
 	fs.open(output_file_name, ios::app | ios::binary);
 
@@ -2466,13 +2534,12 @@ void convert_bin(const vector<string>& filenames , const string& output_file_nam
 			std::string value;
 			ss >> token;
 			if (token == "sfen") {
-				StateInfo si;
-				tpos.set(line.substr(5), &si, Threads.main());
+				tpos.set(line.substr(5), &tstate);
 				tpos.sfen_pack(p.sfen);
 			}
 			else if (token == "move") {
 				ss >> value;
-				p.move = USI::to_move16(value).to_u16();
+				p.move = USIEngine::to_move16(value).to_u16();
 			}
 			else if (token == "score") {
 				ss >> p.score;
@@ -3008,7 +3075,7 @@ namespace Learner {
 		// 1手進める関数
 		void do_move(Position& pos , Move move, StateInfo* states)
 		{
-			ASSERT_LV3(move.is_ok() && pos.pseudo_legal(move) && pos.legal(move));
+			ASSERT_LV3(move.is_ok() && pos.pseudo_legal(move, false) && pos.legal(move));
 
 			pos.do_move(move, states[pos.game_ply()]);
 
@@ -3086,7 +3153,7 @@ namespace Learner {
 
 		auto my_do_move = [&move, &pos, &states ,&count , &line_number , &book_sfens ]()
 		{
-			ASSERT_LV3(move.is_ok() && pos.pseudo_legal(move) && pos.legal(move));
+			ASSERT_LV3(move.is_ok() && pos.pseudo_legal(move, false) && pos.legal(move));
 
 			ASSERT_LV3(pos.game_ply() != 0);
 			pos.do_move(move, states[pos.game_ply()]);
@@ -3115,8 +3182,6 @@ namespace Learner {
 			cout << count << " positions , line_number = " << line_number << endl;
 		};
 
-		ASSERT_LV3(Search::Limits.enteringKingRule = EKR_27_POINT);
-
 		for (auto book_line : my_book)
 		{
 			if ((++line_number % 1000) == 0)
@@ -3140,9 +3205,9 @@ namespace Learner {
 
 				// 定跡の指し手で一手進める
 				auto book_move = book_moves[book_move_index];
-				move = USI::to_move(pos, book_move);
+				move = USIEngine::to_move(pos, book_move);
 				// 信用できない定跡の場合、このチェックが必要。
-				if (!move.is_ok() || !pos.pseudo_legal(move) || !pos.legal(move))
+				if (!move.is_ok() || !pos.pseudo_legal(move, false) || !pos.legal(move))
 					break;
 
 				my_do_move();
@@ -3173,7 +3238,7 @@ namespace Learner {
 		// 定跡の局面を一つ取り出す
 		auto& ps = my_book_sfens[prng.rand(my_book_sfens.size())];
 		ASSERT_LV3(ps.gamePly != 0);
-		pos.set_from_packed_sfen(ps.sfen , &states[0 /* ここは確実に空いてる */] , &th , /*mirror = */ false , ps.gamePly);
+		pos.set_from_packed_sfen(ps.sfen , &states[0 /* ここは確実に空いてる */], /*mirror = */ false , ps.gamePly);
 
 		// ランダムムーブで1手進める
 		// 実現確率が高い局面の周辺局面ということならランダムムーブ1手がベスト
@@ -3260,7 +3325,7 @@ namespace Learner {
 			// -- 1局分スタート
 
 			// 自分スレッド用の置換表があるはずなので自分の置換表だけをクリアする。
-			th.tt.clear();
+			th.tt.clear(Threads);
 
 			// 局面の初期化
 			set_start_pos(pos, th , states);

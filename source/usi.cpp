@@ -20,6 +20,10 @@
 
 namespace YaneuraOu {
 
+#if defined(EVAL_LEARN)
+OptionsMap Options;
+#endif
+
 // benchmark用のコマンドその2
 constexpr auto BenchmarkCommand = "speedtest";
 
@@ -104,6 +108,16 @@ void USIEngine::set_engine(IEngine& _engine) {
     // ⚠ やねうら王では、Engineのコンストラクタではoptionを生やさない設計に変更した。
     //     よって、派生classのadd_options()をここで明示的に呼び出してoptionを生やす必要がある。
     engine.add_options();
+
+#if defined(EVAL_LEARN)
+	// グローバルなOptionsにコピーしておく。
+	Options.clear();
+	for (size_t i = 0; i < engine.get_options().size() ; ++i)
+	{
+		auto p = engine.get_options().get_option_by_idx(i);
+		Options.add(p.first, p.second);
+	}
+#endif
 
     // 📝 旧評価関数は、起動時にEval::add_options()が呼び出されることを
     //     期待するコードになっているので呼び出して初期化してやる。
@@ -923,6 +937,16 @@ void USIEngine::benchmark(std::istream& args) {
 void USIEngine::setoption(std::istringstream& is) {
     engine.wait_for_search_finished();
     engine_options().setoption(is);
+
+#if defined(EVAL_LEARN)
+	// グローバルなOptionsにコピーしておく。
+	Options.clear();
+	for (size_t i = 0; i < engine.get_options().size(); ++i)
+	{
+		auto p = engine.get_options().get_option_by_idx(i);
+		Options.add(p.first, p.second);
+	}
+#endif
 }
 
 std::uint64_t USIEngine::perft(const Search::LimitsType& limits) {

@@ -212,6 +212,10 @@ ClientBin/
 node_modules/
 orleans.codegen.cs
 
+source/eval/nn.bin
+source/tanuki-.halfkp_256x2-32-32.2023-05-08.7z
+*.7z
+
 # RIA/Silverlight projects
 Generated_Code/
 

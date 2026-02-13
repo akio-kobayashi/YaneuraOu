@@ -143,6 +143,12 @@ class OptionsMap {
     // 💡 ある名前のoption項目を持っているかどうかを調べるのに使う。
     std::size_t count(const std::string& option_name) const;
 
+	// 保持しているoptionの数
+	std::size_t size() const { return options_map.size(); }
+
+	// 保持しているoptionをすべてクリアする
+	void clear() { options_map.clear(); }
+
 #if !STOCKFISH
 
     // 📌 やねうら王独自拡張 📌

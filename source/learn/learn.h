@@ -10,6 +10,9 @@
 
 namespace YaneuraOu {
 
+// 評価関数や探索リソースの初期化を行う簡易ラッパー
+void is_ready(bool skip_readyok);
+
 // =====================
 //  学習時の設定
 // =====================
@@ -231,6 +234,7 @@ namespace Learner
 	// EVAL_LEARNをdefineするなら、このスタブが必須。
 	Learner::ValuePV  search(Position& pos, int depth , size_t multiPV = 1 , u64 NodesLimit = 0);
 	Learner::ValuePV qsearch(Position& pos);
+	void UnitTest(Test::UnitTester& tester);
 
 	double calc_grad(Value shallow, const PackedSfenValue& psv);
 

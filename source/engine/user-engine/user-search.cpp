@@ -21,9 +21,15 @@ namespace Search {
 	{
 	public:
 
-		UserWorker(OptionsMap& options, ThreadPool& threads, size_t threadIdx, NumaReplicatedAccessToken numaAccessToken):
+		UserWorker(OptionsMap& options,
+                   ThreadPool& threads,
+                   size_t threadIdx,
+                   NumaReplicatedAccessToken numaAccessToken,
+                   Position& rootPos,
+                   StateInfo& rootState,
+                   Search::RootMoves& rootMoves):
 			// 基底classのconstructorの呼び出し
-			Worker(options,threads,threadIdx,numaAccessToken){ }
+			Worker(options,threads,threadIdx,numaAccessToken,rootPos,rootState,rootMoves){ }
 
 		// このworker(探索用の1つのスレッド)の初期化
 		// 📝 これは、"usinewgame"のタイミングで、すべての探索スレッド(エンジンオプションの"Threads"で決まる)に対して呼び出される。
@@ -108,8 +114,12 @@ class UserEngine : public Engine
 
 		// 💡　難しいことは考えずにコピペして使ってください。"Search::UserWorker"と書いてあるところに、
 		//      あなたの作成したWorker派生classの名前を書きます。
-		auto worker_factory = [&](size_t threadIdx, NumaReplicatedAccessToken numaAccessToken)
-			{ return std::make_unique<Search::UserWorker>(options, threads, threadIdx, numaAccessToken); };
+		auto worker_factory = [&](size_t threadIdx,
+                                  NumaReplicatedAccessToken numaAccessToken,
+                                  Position& rootPos,
+                                  StateInfo& rootState,
+                                  Search::RootMoves& rootMoves)
+			{ return std::make_unique<Search::UserWorker>(options, threads, threadIdx, numaAccessToken, rootPos, rootState, rootMoves); };
                 threads.set(numaContext.get_numa_config(), options,
                             options["Threads"], worker_factory);
 

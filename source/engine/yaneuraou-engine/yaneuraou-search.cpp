@@ -323,17 +323,21 @@ void YaneuraOuEngine::resize_threads() {
 
     // 📌 スレッド数のリサイズ
 
-    auto worker_factory = [&](size_t threadIdx, NumaReplicatedAccessToken numaAccessToken) {
+    auto worker_factory = [&](size_t threadIdx,
+                              NumaReplicatedAccessToken numaAccessToken,
+                              Position& rootPos,
+                              StateInfo& rootState,
+                              Search::RootMoves& rootMoves) {
         return std::make_unique<Search::YaneuraOuWorker>(
 
 			// Worker基底classが渡して欲しいもの。
-			options, threads, threadIdx, numaAccessToken,
+			options, threads, threadIdx, numaAccessToken, rootPos, rootState, rootMoves,
 
 			// 追加でYaneuraOuEngineからもらいたいもの
 			tt, *this);
     };
 
-    threads.set(numaContext.get_numa_config(), options, options["Threads"], worker_factory);
+    threads.set(numaContext.get_numa_config(), options, options["Threads"], worker_factory, &tt);
 
 	// 置換表の割り当て
 	set_tt_size(options["USI_Hash"]);
@@ -614,9 +618,12 @@ Search::YaneuraOuWorker::YaneuraOuWorker(OptionsMap&               options,
                                          ThreadPool&               threads,
                                          size_t                    threadIdx,
                                          NumaReplicatedAccessToken numaAccessToken,
+                                         Position&                 rootPos,
+                                         StateInfo&                rootState,
+                                         RootMoves&                rootMoves,
 										 TranspositionTable&       tt,
 										 YaneuraOuEngine&          engine) :
-    Search::Worker(options, threads, threadIdx, numaAccessToken), tt(tt),
+    Search::Worker(options, threads, threadIdx, numaAccessToken, rootPos, rootState, rootMoves), tt(tt),
 		engine(engine), manager(engine.manager) {
 
     //clear();

@@ -178,7 +178,10 @@ namespace Test
 
 #if defined(YANEURAOU_ENGINE) && defined(EVAL_LEARN)
 		// 自己対局のテスト(これはデバッガで追いかけたいことがあるので、他のをすっ飛ばして最初にやって欲しいが…)
-		tester.run(Learner::UnitTest);
+		tester.run([](Test::UnitTester& tester, IEngine& engine) {
+			(void)engine; // unused
+			Learner::UnitTest(tester);
+		});
 #endif
 
 	}

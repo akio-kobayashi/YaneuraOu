@@ -536,10 +536,10 @@ TTEntry* TranspositionTable::first_entry(const Key& key_, Color side_to_move) co
 #if defined(EVAL_LEARN)
 // スレッド数が変更になった時にThread.set()から呼び出される。
 // これに応じて、スレッドごとに保持しているTTを初期化する。
-void TranspositionTable::init_tt_per_thread()
+void TranspositionTable::init_tt_per_thread(ThreadPool& threads)
 {
 	// スレッド数
-	size_t thread_size = Threads.size();
+	size_t thread_size = threads.size();
 
 	// エンジン終了時にThreads.set(0)で全スレッド終了させるコードが書いてあるので、
 	// そのときに、Threads.size() == 0の状態で呼び出される。
@@ -556,7 +556,7 @@ void TranspositionTable::init_tt_per_thread()
 	// これを、自分が確保したglobalな置換表用メモリから切り分けて割当てる。
 	for (size_t i = 0; i < thread_size; ++i)
 	{
-		auto& tt = Threads[i]->tt;
+		auto& tt = threads.threads[i]->tt;
 		tt.clusterCount = clusterCountPerThread;
 		tt.table = this->table + clusterCountPerThread * i;
 	}

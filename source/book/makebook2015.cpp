@@ -58,8 +58,8 @@ namespace Book {
 
 			auto th = Threads[thread_id];
 			auto& pos = th->rootPos;
-			StateInfo si;
-			pos.set(sfen,&si,th);
+			auto& state = th->rootState;
+			pos.set(sfen, &state);
 
 			if (pos.is_mated())
 				continue;
@@ -70,19 +70,20 @@ namespace Book {
 			Learner::search(pos, search_depth , multi_pv , search_nodes);
 
 			// MultiPVで局面を足す、的な
-			size_t m = std::min(multi_pv, th->rootMoves.size());
+			auto& rootMoves = th->rootMoves;
+			size_t m = std::min(multi_pv, rootMoves.size());
 
 			BookMovesPtr move_list(new BookMoves());
 
 			for (size_t i = 0; i < m ; ++i)
 			{
-				const auto& rootMoves = th->rootMoves[i];
-				Move nextMove = (rootMoves.pv.size() >= 1) ? rootMoves.pv[1] : Move::none();
+				const auto& rootMove = rootMoves[i];
+				Move nextMove = (rootMove.pv.size() >= 1) ? rootMove.pv[1] : Move::none();
 
 				// 出現頻度は、バージョンナンバーを100倍したものにしておく)
 				// ⇨ ENGINE_VERSIONに数字以外の文字列入れたいことがあるので、これは良くない仕様。
 				//  800固定とする。(いま最新がV8.00系だから)
-				BookMove bp(rootMoves.pv[0].to_move16(), nextMove.to_move16(), rootMoves.score
+				BookMove bp(rootMove.pv[0].to_move16(), nextMove.to_move16(), rootMove.score
 					, search_depth, /*int(atof(ENGINE_VERSION) * 100)*/ 800);
 
 				// MultiPVで思考しているので、手番側から見て評価値の良い順に並んでいることは保証される。

@@ -437,7 +437,7 @@ class Engine: public IEngine {
     OptionsMap options;
 
     // スレッドプール(探索用スレッド)
-    ThreadPool threads;
+    ThreadPool& threads;
 
     //TranspositionTable tt;
     // 📝 やねうら王ではEngine基底classはTTを持たない。

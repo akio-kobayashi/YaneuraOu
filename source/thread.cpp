@@ -9,6 +9,8 @@
 
 namespace YaneuraOu {
 
+ThreadPool Threads;
+
 // Constructor launches the thread and waits until it goes to sleep
 // in idle_loop(). Note that 'searching' and 'exit' should be already set.
 
@@ -40,8 +42,7 @@ Thread::Thread(
 
 		this->numaAccessToken = binder();
 		this->worker =
-			//std::make_unique<Search::Worker>(/* sharedState, std::move(sm),*/ thread_id, this->numaAccessToken);
-			std::move(worker_factory(thread_id, this->numaAccessToken));
+			std::move(worker_factory(thread_id, this->numaAccessToken, this->rootPos, this->rootState, this->rootMoves));
 		});
 
 	// スレッドはsearching == trueで開始するので、このままworkerのほう待機状態にさせておく
@@ -171,7 +172,8 @@ void ThreadPool::set(const NumaConfig&                           numaConfig,
 	// 🤔 やねうら王ではさらに抽象化する。
 	const OptionsMap&            options,
     size_t                       requested_threads,
-    const Search::WorkerFactory& worker_factory
+    const Search::WorkerFactory& worker_factory,
+	TranspositionTable*          tt
 #endif
 	)
 {
@@ -294,6 +296,13 @@ void ThreadPool::set(const NumaConfig&                           numaConfig,
 
 		// 🤔 これ、ThreadPool::clear()のなかでやっているので不要なのでは…。
 		main_thread()->wait_for_search_finished();
+
+#if defined(EVAL_LEARN)
+		// 学習のときは、スレッドごとに置換表を分割して用いる。
+		// そのための初期化処理。
+		if (tt)
+			tt->init_tt_per_thread(*this);
+#endif
 	}
 }
 

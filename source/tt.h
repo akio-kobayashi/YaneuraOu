@@ -4,11 +4,13 @@
 //#include <cstddef>
 //#include <cstdint>
 #include "types.h"
+#include "extra/key128.h"
 #include "misc.h"
 #include "memory.h"
-#include "thread.h"
 
 namespace YaneuraOu {
+
+class ThreadPool;
 
 struct Key128;
 struct Key256;
@@ -186,6 +188,12 @@ public:
       const;  // This is the hash function; its only external use is memory prefetching.
 #else
 	TTEntry* first_entry(const Key& key, Color side_to_move) const;
+#endif
+
+#if defined(EVAL_LEARN)
+	// スレッド数が変更になった時にThread::set()から呼び出される。
+	// これに応じて、スレッドごとに保持しているTTを初期化する。
+	void init_tt_per_thread(ThreadPool& threads);
 #endif
 
 	static void UnitTest(Test::UnitTester& unittest, IEngine& engine);

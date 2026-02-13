@@ -64,7 +64,7 @@ void add_options_(OptionsMap& options, ThreadPool& threads) {
     // このコマンドの実行前に異常終了してしまう。
     // そこでこの隠しオプションでisready時の評価関数の読み込みを抑制して、
     // test evalconvertコマンドを叩く。
-    Options("SkipLoadingEval", Option(false));
+    options.add("SkipLoadingEval", Option(false));
 #endif
 
 #if defined(NNUE_EMBEDDING_OFF)
