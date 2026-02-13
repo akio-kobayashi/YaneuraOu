@@ -161,24 +161,15 @@ namespace NNUE {
 	LargePagePtr<FeatureTransformer> feature_transformer;
 
     // 評価関数
-#if defined(SFNNwoPSQT)
-    AlignedPtr<Network> network[kLayerStacks];
-#else
     AlignedPtr<Network> network;
-#endif
 
     // 評価関数ファイル名
     const char* const kFileName = EvalFileDefaultName;
 
     // 評価関数の構造を表す文字列を取得する
     std::string GetArchitectureString() {
-        const std::string base = "Features=" + FeatureTransformer::GetStructureString() +
+        return "Features=" + FeatureTransformer::GetStructureString() +
 			",Network=" + Network::GetStructureString();
-#if defined(SFNNwoPSQT)
-		return "ModelType=SFNNWithoutPsqt;" + base + "{LayerStack=" + std::to_string(kLayerStacks) + "}";
-#else
-		return base;
-#endif
     }
 
 namespace {
@@ -303,38 +294,50 @@ namespace {
     			sync_cout << "info string NNUE feature params read failed: " << result.to_string() << sync_endl;
     			return result;
     		}
+
+			// FC Hashの読み込み (仕様書 3項)
+			std::uint32_t fc_hash;
+			stream.read(reinterpret_cast<char*>(&fc_hash), sizeof(fc_hash));
+
 			if (kLayerStacks > 1) {
+				// LayerStack (L1) 8つのバケットを連続して読み込む
 				for (int i = 0; i < kLayerStacks; ++i) {
-					result = Detail::ReadParameters<Network>(stream, network[i]);
-					if (result.is_not_ok()) {
-						sync_cout << "info string NNUE network params read failed at stack " << i << ": " << result.to_string() << sync_endl;
-						return result;
-					}
+					if (!network->fc_0[i].ReadParameters(stream).is_ok()) return Tools::ResultCode::FileReadError;
 				}
 			} else {
-				result = Detail::ReadParameters<Network>(stream, network);
-				if (result.is_not_ok()) {
-					sync_cout << "info string NNUE network params read failed: " << result.to_string() << sync_endl;
-					return result;
-				}
+				if (!network->fc_0.ReadParameters(stream).is_ok()) return Tools::ResultCode::FileReadError;
 			}
+			
+			// L2, Output層 (共通) の読み込み
+			if (!network->fc_1.ReadParameters(stream).is_ok()) return Tools::ResultCode::FileReadError;
+			if (!network->fc_2.ReadParameters(stream).is_ok()) return Tools::ResultCode::FileReadError;
 
     		if (stream && stream.peek() == std::ios::traits_type::eof())
     			return Tools::ResultCode::Ok;
     		else
     			return Tools::ResultCode::FileCloseError;
     	}
+
     // 評価関数パラメータを書き込む
     bool WriteParameters(std::ostream& stream) {
         if (!WriteHeader(stream, kHashValue, GetArchitectureString())) return false;
         if (!Detail::WriteParameters<FeatureTransformer>(stream, feature_transformer)) return false;
+
+		// FC Hashの書き出し
+		std::uint32_t fc_hash = 0; // 適宜計算
+		stream.write(reinterpret_cast<char*>(&fc_hash), sizeof(fc_hash));
+
 		if (kLayerStacks > 1) {
 			for (int i = 0; i < kLayerStacks; ++i) {
-				if (!Detail::WriteParameters<Network>(stream, network[i])) return false;
+				if (!network->fc_0[i].WriteParameters(stream)) return false;
 			}
 		} else {
-			if (!Detail::WriteParameters<Network>(stream, network)) return false;
+			if (!network->fc_0.WriteParameters(stream)) return false;
 		}
+
+		if (!network->fc_1.WriteParameters(stream)) return false;
+		if (!network->fc_2.WriteParameters(stream)) return false;
+
         return !stream.fail();
     }
 
@@ -344,15 +347,11 @@ namespace {
     }
 
     // レイヤースタックの選択。
-    // 駒の価値の合計（進行度）に応じて分岐させる。
+    // 手数（仕様：ply / 32）に応じて分岐させる。
     static int stack_index_for_nnue(const Position& pos) {
-        // 歩以外の駒の合計価値
-        const Value npm = pos.non_pawn_material();
-
-        // npmは概ね 0 〜 14000 程度の範囲。
-        // これを kLayerStacks 個のバケットに等間隔で分割する。
-        // (16384を基準に計算)
-        int idx = (16384 - (int)npm) * kLayerStacks / 16384;
+        // 現在の手数を取得 (仕様: current_ply / 32)
+        int ply = pos.game_ply();
+        int idx = ply / 32;
 
         if (idx < 0) idx = 0;
         if (idx >= kLayerStacks) idx = kLayerStacks - 1;
@@ -371,9 +370,11 @@ namespace {
         feature_transformer->Transform(pos, transformed_features, refresh);
         alignas(kCacheLineSize) char buffer[Network::kBufferSize];
 
-        const auto output = kLayerStacks > 1
-            ? network[stack_index_for_nnue(pos)]->Propagate(transformed_features, buffer)
-            : network->Propagate(transformed_features, buffer);
+        // 仕様に合わせ、Network構造体内部でバケット選択を行うか、
+        // あるいは個別にPropagateを呼び出す。
+        // ここでは仕様書のL1スタック構造を反映するため、bucketを渡す。
+        const auto bucket = kLayerStacks > 1 ? stack_index_for_nnue(pos) : 0;
+        const auto output = network->Propagate(transformed_features, buffer, bucket);
 
         // VALUE_MAX_EVALより大きな値が返ってくるとaspiration searchがfail highして
         // 探索が終わらなくなるのでVALUE_MAX_EVAL以下であることを保証すべき。
