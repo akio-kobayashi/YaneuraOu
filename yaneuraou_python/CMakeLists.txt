@@ -6,7 +6,7 @@ project(yaneuraou_python LANGUAGES CXX) # プロジェクト名と使用言語�
 find_package(pybind11 CONFIG REQUIRED)
 
 # Pythonラッパーのモジュール名を定義
-set(MODULE_NAME yaneuraou_python.core)
+set(MODULE_NAME core)
 
 # YaneuraOuのソースディレクトリのパスを設定 (親ディレクトリにあるsourceを指す)
 # これはyaneuraou_python_wrapper/CMakeLists.txtから見て '../source' となる

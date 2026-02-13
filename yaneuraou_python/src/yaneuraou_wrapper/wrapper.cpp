@@ -120,7 +120,7 @@ py::tuple solve_mate(const std::string& sfen_str, u64 nodes_limit) {
 
 // --- pybind11モジュール定義 ---
 
-PYBIND11_MODULE(python_yaneuraou_core, m) {
+PYBIND11_MODULE(core, m) {
     m.doc() = "pybind11 based Python wrapper for YaneuraOu";
 
     // --- 初期化 ---
