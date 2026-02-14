@@ -346,12 +346,27 @@ namespace {
         feature_transformer->UpdateAccumulatorIfPossible(pos);
     }
 
-    // レイヤースタックの選択。
-    // 手数（仕様：ply / 32）に応じて分岐させる。
+    // 指示書に基づくバケッティング専用のNPM計算
     static int stack_index_for_nnue(const Position& pos) {
-        // 現在の手数を取得 (仕様: current_ply / 32)
-        int ply = pos.game_ply();
-        int idx = ply / 32;
+        // 指示された駒価値: 香:430, 桂:581, 銀:716, 金:782, 角:1008, 飛:1193
+        // 成り駒は元の駒と同じ。
+        static constexpr int PieceValues[] = {
+            0, 0, 430, 581, 716, 782, 1008, 1193, // 先手歩〜飛
+            0, 0, 430, 581, 716, 782, 1008, 1193, // 先手成香〜龍
+            0, 0, 430, 581, 716, 782, 1008, 1193, // 後手
+            0, 0, 430, 581, 716, 782, 1008, 1193  // 後手
+        };
+
+        int npm = 0;
+        for (Piece pc = LANCE; pc <= ROOK; ++pc) {
+            npm += (pos.count<pc>(WHITE) + pos.count<pc>(BLACK)) * PieceValues[pc];
+            // 成り駒も加算 (成り駒は PIECE_PROMOTE が足されたインデックスにある)
+            Piece ppc = Piece(pc + PIECE_PROMOTE);
+            npm += (pos.count<ppc>(WHITE) + pos.count<ppc>(BLACK)) * PieceValues[pc];
+        }
+
+        // インデックス計算式: (16384 - npm) * 8 / 16384
+        int idx = (16384 - npm) * 8 / 16384;
 
         if (idx < 0) idx = 0;
         if (idx >= kLayerStacks) idx = kLayerStacks - 1;
@@ -370,11 +385,18 @@ namespace {
         feature_transformer->Transform(pos, transformed_features, refresh);
         alignas(kCacheLineSize) char buffer[Network::kBufferSize];
 
-        // 仕様に合わせ、Network構造体内部でバケット選択を行うか、
-        // あるいは個別にPropagateを呼び出す。
-        // ここでは仕様書のL1スタック構造を反映するため、bucketを渡す。
         const auto bucket = kLayerStacks > 1 ? stack_index_for_nnue(pos) : 0;
         const auto output = network->Propagate(transformed_features, buffer, bucket);
+
+        // 仕様書 4項: FinalScore = NNUE_Output + (SideToMove_PSQT - Opponent_PSQT)
+        // 今回の指示では PSQT 重みは別途読み込むか、既存のものを利用する。
+        // ここでは NNUE 出力を基本とし、PSQT パスを合算する。
+        Value score = (Value)output[0];
+
+        // TODO: PSQTパスの重みが読み込めている場合はここで加算する。
+        // 現状はNNUE出力(FV_SCALE)を返す。
+        return score;
+    }
 
         // VALUE_MAX_EVALより大きな値が返ってくるとaspiration searchがfail highして
         // 探索が終わらなくなるのでVALUE_MAX_EVAL以下であることを保証すべき。

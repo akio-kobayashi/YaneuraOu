@@ -30,8 +30,9 @@ namespace Layers {
 
 // Define layers
 using InputLayer = InputSlice<kTransformedFeatureDimensions * 2>;
-using L1 = AffineTransformSparseInput<InputLayer, 8>; // 仕様: L1出力は8?
-using L2 = AffineTransform<SqrClippedReLU<L1>, 96>;   // 仕様: L2入力はSqrClippedReLU
+// 仕様: Descriptionより L1出力=8, L2出力=96, L3出力=1
+using L1 = AffineTransformSparseInput<InputLayer, 8>; 
+using L2 = AffineTransform<SqrClippedReLU<L1>, 96>;
 using L3 = AffineTransform<ClippedReLU<L2>, 1>;
 
 }  // namespace Layers
@@ -51,7 +52,8 @@ struct Network {
     }
 
     static std::string GetStructureString() {
-        return "LayerStack[8x8<-2048]"; // 仕様書の例に合わせる
+        // 仕様書の例に合わせる
+        return "LayerStack[8x8<-2048](InputSlice[2048](0:2048))";
     }
 
     struct alignas(kCacheLineSize) Buffer {
@@ -70,19 +72,25 @@ struct Network {
         // 仕様に基づき、選択されたバケットのL1を使用
         fc_0[bucket].Propagate(transformedFeatures, buf.fc_0_out);
         
-        // SCReLU (SqrClippedReLU) 適用
+        // SCReLU (SqrClippedReLU) 適用 (指示書 3項)
         Layers::SqrClippedReLU<Layers::L1> ac_0;
         ac_0.Propagate(buf.fc_0_out, buf.ac_0_out);
 
+        // L2層
         fc_1.Propagate(buf.ac_0_out, buf.fc_1_out);
         
+        // L2後のClippedReLU (Descriptionより)
         Layers::ClippedReLU<Layers::L2> ac_1;
         ac_1.Propagate(buf.fc_1_out, buf.ac_1_out);
 
+        // L3層 (Output)
         fc_2.Propagate(buf.ac_1_out, buf.fc_2_out);
 
         return buf.fc_2_out;
     }
+
+    // Read/Write Parameters (明示的に実装する必要がある場合はここに追加)
+    // 今回は evaluate_nnue.cpp 側で個別に ReadParameters を呼ぶ。
 };
 
 }  // namespace Eval::NNUE
