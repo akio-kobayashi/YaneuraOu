@@ -194,7 +194,7 @@ def read_engine_output(engine_idx, proc, message_queue):
 #  book_sfens : 定跡
 #  opt2       : 勝敗の表示の先頭にT2,b2000 のように対局条件を文字列化して突っ込む用。
 #  book_moves : 定跡の手数
-def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_moves):
+def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_moves,kifu_format="sfen"):
 
 	win = lose = draw = 0
 	win_black = win_white = 0
@@ -281,8 +281,23 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 	if FileLogging:
 		log_file = open("script_log"+now.strftime("%Y%m%d%H%M%S")+".txt","w")
 
+	kif_file = None
+	csa_exporters = None
+	kif_base = now.strftime("%Y%m%d%H%M%S") + opt2.replace(",","_")
 	if KifOutput:
-		kif_file = open(now.strftime("%Y%m%d%H%M%S") + opt2.replace(",","_") + ".sfen","w")
+		if kifu_format == "csa":
+			try:
+				from cshogi import CSA
+			except ImportError:
+				print("cshogi is not installed. Please install it with 'pip install cshogi'")
+				sys.exit(1)
+
+			csa_exporters = []
+			for game_idx in range(threads):
+				csa_path = f"{kif_base}_g{game_idx:03d}.csa"
+				csa_exporters.append(CSA.Exporter(csa_path, append=False))
+		else:
+			kif_file = open(kif_base + ".sfen","w")
 
 	def send_cmd(i,s):
 		p = procs[i]
@@ -354,6 +369,35 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 	def outstd(i,line):
 		print("["+str(i)+"]>" + line.strip())
 		sys.stdout.flush()
+
+	def write_csa_game(game_idx, game_result):
+		exporter = csa_exporters[game_idx]
+		engine_names = [
+			os.path.basename(engines_full[0]),
+			os.path.basename(engines_full[1]),
+		]
+		exporter.info(names=engine_names, version="V2")
+
+		try:
+			import cshogi
+			board = cshogi.Board()
+			evals = eval_values[game_idx].split()
+			usi_moves = sfens[game_idx].split()
+			for ply, usi_move in enumerate(usi_moves):
+				move = board.push_usi(usi_move)
+				comment = None
+				if ply < len(evals):
+					comment = f"cp {evals[ply]}"
+				exporter.move(move, comment=comment)
+		except Exception as e:
+			outlog(game_idx * 2, f"CSA write error: {e}")
+			exporter.endgame("%CHUDAN")
+			return
+
+		if game_result == GameResult.DRAW:
+			exporter.endgame("%SENNICHITE")
+		else:
+			exporter.endgame("%TORYO")
 
 
 	# set options for each engine
@@ -510,8 +554,11 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 					gameover_cmd(engine_idx, gameover)
 					gameover_cmd(engine_idx^1, gameover)
 					if KifOutput:
-						kif_file.write("startpos moves " + sfens[engine_idx//2] + "\n")
-						kif_file.write(eval_values[engine_idx//2] + "\n")
+						if kifu_format == "csa":
+							write_csa_game(engine_idx//2, gameover)
+						else:
+							kif_file.write("startpos moves " + sfens[engine_idx//2] + "\n")
+							kif_file.write(eval_values[engine_idx//2] + "\n")
 					turns[engine_idx//2] = turns[engine_idx//2] ^ 1 # 手番を交代
 
 			elif message['type'] == 'terminated':
@@ -565,7 +612,11 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 				if FileLogging:
 					log_file.close()
 				if KifOutput:
-					kif_file.close()
+					if kifu_format == "csa":
+						for exporter in csa_exporters:
+							exporter.close()
+					else:
+						kif_file.close()
 				return win, lose, draw, win_black, win_white
 
 			# 一定回数ごとに途中結果を出力
@@ -576,7 +627,11 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 						log_file.write(f"[{i}] State = {states[i]}\n")
 					log_file.flush()
 				if KifOutput:
-					kif_file.flush()
+					if kifu_format == "csa":
+						for exporter in csa_exporters:
+							exporter.f.flush()
+					else:
+						kif_file.flush()
 
 		# メッセージキューの処理とタイムアウト処理の間で短いスリープを挟む
 		time.sleep(0.001)
@@ -633,6 +688,7 @@ def main():
 	# --- Logging settings ---
 	parser.add_argument('--log', action='store_true', help="Enable file logging for engine communication.")
 	parser.add_argument('--param_log_path', type=str, default="", help="Enable and specify path for parameter logging.")
+	parser.add_argument('--kifu_format', type=str, default="sfen", choices=["sfen", "csa"], help="Output format for game records.")
 	
 	args = parser.parse_args()
 
@@ -685,6 +741,7 @@ def main():
 	PARAMETERS_LOG_FILE_PATH = config['param_log_path']
 	rand_book = config['rand_book']
 	fileLogging = config['log']
+	kifu_format = config['kifu_format']
 
 	# expand eval_dir
 	evaldirs = []
@@ -704,6 +761,7 @@ def main():
 	print("book_moves     : " , book_moves)
 	print("engine_threads : " , engine_threads)
 	print("rand_book      : " , rand_book)
+	print("kifu_format    : " , kifu_format)
 	print("PARAMETERS_LOG_FILE_PATH : " , PARAMETERS_LOG_FILE_PATH)
 
 	total_win = total_lose = total_draw = 0
@@ -762,7 +820,17 @@ def main():
 			# 短くスレッド数と秒読み条件を文字列化
 			opt2 = "T"+str(engine_threads) + "," + play_time
 
-			w, l, d, wb, ww = vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_moves)
+			w, l, d, wb, ww = vs_match(
+				engines_full,
+				options,
+				threads,
+				loop,
+				book_sfens,
+				fileLogging,
+				opt2,
+				book_moves,
+				kifu_format=kifu_format,
+			)
 
 			total_win += w
 			total_lose += l
