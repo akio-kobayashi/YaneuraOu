@@ -117,6 +117,7 @@ def main():
     batch_size = args.parallel_games * 2 # 効率のため並列数分を1バッチとする
     
     print("Starting matches...")
+    status = "CONTINUE"
     while (total_wins + total_losses + total_draws) < args.max_games:
         # 1バッチ分実行 (vs_match を現在の進捗から継続できるように調整が必要)
         # engine_invoker.py の vs_match はループ回数(loop)を指定して一気に回す仕様
@@ -131,18 +132,15 @@ def main():
         status, llr = sprt.check_status(total_wins, total_losses, total_draws)
         total_n = total_wins + total_losses + total_draws
         
-        print(f"
-[{total_n} games] W:{total_wins} L:{total_losses} D:{total_draws} | LLR:{llr:.4f}")
+        print(f"\n[{total_n} games] W:{total_wins} L:{total_losses} D:{total_draws} | LLR:{llr:.4f}")
         
         if status != "CONTINUE":
-            print(f"
-*** SPRT Result: {status} ***")
+            print(f"\n*** SPRT Result: {status} ***")
             print(f"Final LLR: {llr:.4f}")
             break
 
     if status == "CONTINUE":
-        print("
-Reached max games without definitive SPRT result.")
+        print("\nReached max games without definitive SPRT result.")
 
 if __name__ == "__main__":
     main()

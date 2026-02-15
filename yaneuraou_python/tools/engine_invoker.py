@@ -125,7 +125,7 @@ def create_option(engines,engine_threads,evals,times,hashes,PARAMETERS_LOG_FILE_
 			option.append("setoption name EvalDir value " + evals[i])
 			option.append("setoption name Hash value " + str(hashes[i]))
 			option.append("setoption name BookFile value no_book")
-			option.append("setoption MinimumThinkingTime value 1000")
+			option.append("setoption name MinimumThinkingTime value 1000")
 			option.append("setoption name NetworkDelay value 0")
 			option.append("setoption name NetworkDelay2 value 0")
 
@@ -297,14 +297,14 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 		send_cmd(i,"isready")
 		states[i] = EngineState.WAIT_FOR_READYOK
 		# rest_time = total_time
-		rest_times[i] = options[2][0]
+		rest_times[i] = options[2 + (i & 1)][0]
 
 	def go_cmd(i):
 		p = procs[i]
 		# USI "position"
 		s = "position startpos"
-		if sfens[i/2] != "":
-			s += " moves " + sfens[i/2]
+		if sfens[i//2] != "":
+			s += " moves " + sfens[i//2]
 		send_cmd(i,s)
 
 		# USI "go"
@@ -321,10 +321,10 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 	def usinewgame_cmd(i,sfen_no):
 		p = procs[i]
 		send_cmd(i,"usinewgame")
-		sfens[i/2] = book_sfens[sfen_no]
-		moves[i/2] = 0
+		sfens[i//2] = book_sfens[sfen_no]
+		moves[i//2] = 0
 		# 定跡の評価値はよくわからんので0にしとくしかない。
-		eval_values[i/2] = "0 "*book_moves
+		eval_values[i//2] = "0 "*book_moves
 
 	# ゲームオーバーのハンドラ
 	# i : engine index
@@ -444,12 +444,13 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 							break
 
 					# if (not random time)
-					if options[2][3]==0:
+					time_setting = options[2 + (engine_idx & 1)]
+					if time_setting[3] == 0:
 						elapsed_time = int(math.ceil(time.time() - go_times[engine_idx])*1000)
-						r = rest_times[engine_idx] + options[2][1] - elapsed_time
+						r = rest_times[engine_idx] + time_setting[1] - elapsed_time
 
 						if r < 0:
-							r += options[2][2] # byoyomi加算
+							r += time_setting[2] # byoyomi加算
 							if False: # このブロックは常にFalseなので実質無効
 								elapsed_time2 = int((time.time() - go_times[engine_idx])*1000)
 								r = rest_times[engine_idx] + options[2][1] + options[2][2] - elapsed_time2
@@ -528,11 +529,11 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 
 		# 全エンジンの初期化がまだならisreadyを送る
 		for i in range(len(states)):
-			if states[i] == "init":
+			if states[i] == EngineState.INIT:
 				isready_cmd(i)
 			
 			# goコマンドを送信してから一定時間経過している場合のタイムアウト処理
-			if states[i] == "wait_for_bestmove" \
+			if states[i] == EngineState.WAIT_FOR_BESTMOVE \
 				and time.time() - go_times[i] >= (300 if "t" in opt2 else 60):
 				
 				go_times[i] = sys.maxsize # 再度タイムアウトしないように
@@ -685,24 +686,24 @@ def main():
 	rand_book = config['rand_book']
 	fileLogging = config['log']
 
-# expand eval_dir
+	# expand eval_dir
+	evaldirs = []
+	eval2_root = os.path.join(home, "eval", eval2_path)
+	if not os.path.exists(os.path.join(eval2_root, "0")):
+		evaldirs.append(eval2_path)
+	else:
+		i = 0
+		while os.path.exists(os.path.join(eval2_root, str(i))):
+			evaldirs.append(os.path.join(eval2_path, str(i)))
+			i += 1
 
-evaldirs = []
-if not os.path.exists(os.path.join(home, eval2_path, "0")) :
-	evaldirs.append(eval2_path)
-else:
-	i = 0
-	while os.path.exists(os.path.join(home, eval2_path, str(i))):
-		evaldirs.append(os.path.join(eval2_path, str(i)))
-		i += 1
-
-print("home           : " , home)
-print("play_time_list : " , play_time_list)
-print("evaldirs       : " , evaldirs)
-print("hash size      : " , hashes)
-print("book_moves     : " , book_moves)
-print("engine_threads : " , engine_threads)
-print("rand_book      : " , rand_book)
+	print("home           : " , home)
+	print("play_time_list : " , play_time_list)
+	print("evaldirs       : " , evaldirs)
+	print("hash size      : " , hashes)
+	print("book_moves     : " , book_moves)
+	print("engine_threads : " , engine_threads)
+	print("rand_book      : " , rand_book)
 	print("PARAMETERS_LOG_FILE_PATH : " , PARAMETERS_LOG_FILE_PATH)
 
 	total_win = total_lose = total_draw = 0
@@ -736,7 +737,6 @@ print("rand_book      : " , rand_book)
 	# 古いthreads = threads // engine_threads の行は不要。
 
 	for evaldir in evaldirs:
-
 		engine1 = engine_to_full(engine1_path)
 		engine2 = engine_to_full(engine2_path)
 
@@ -777,3 +777,6 @@ print("rand_book      : " , rand_book)
 #			print "play_time = " + play_time + " , " ,
 			output_rating(total_win, total_draw, total_lose, total_win_black, total_win_white, opt2)
 
+
+if __name__ == "__main__":
+	main()
