@@ -33,6 +33,7 @@ set(YANEURAOU_CORE_SOURCES
     ${YANEURAOU_SOURCE_DIR}/search.cpp
     ${YANEURAOU_SOURCE_DIR}/movepick.cpp
     ${YANEURAOU_SOURCE_DIR}/score.cpp # search.cppが依存
+    ${YANEURAOU_SOURCE_DIR}/extra/sfen_packer.cpp # PackedSfenのために追加
 )
 
 # ヘッダファイルのインクルードパス
@@ -40,6 +41,7 @@ include_directories(
     ${YANEURAOU_SOURCE_DIR}
     ${YANEURAOU_SOURCE_DIR}/eval
     ${YANEURAOU_SOURCE_DIR}/mate # 詰み探索のために追加
+    ${YANEURAOU_SOURCE_DIR}/extra # sfen_packerのために追加
     ${pybind11_INCLUDE_DIRS}
 )
 
@@ -55,7 +57,11 @@ pybind11_add_module(${MODULE_NAME} SHARED
 )
 
 # 詰み探索エンジンを有効にするためのマクロを定義
-target_compile_definitions(${MODULE_NAME} PRIVATE YANEURAOU_MATE_ENGINE)
+target_compile_definitions(${MODULE_NAME} PRIVATE 
+    YANEURAOU_MATE_ENGINE
+    USE_SFEN_PACKER
+    USE_MOVE_PICKER
+)
 
 # モジュールにリンクするライブラリ (例えば数学関数など)
 target_link_libraries(${MODULE_NAME} PRIVATE pybind11::embed)

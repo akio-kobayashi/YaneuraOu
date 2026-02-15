@@ -5,6 +5,8 @@
 #include <vector>
 #include <stdexcept>
 #include <iostream>
+#include <variant>
+#include <cstring>
 
 #include "config.h"
 #include "types.h"
@@ -51,6 +53,45 @@ std::string move_to_usi_str(Move m) {
 }
 
 // --- ラッパー関数 ---
+
+// 静止局面かどうかを判定する
+// 静止局面の定義: 王手がかかっておらず、かつ駒を取る手や王手をかける手がない局面
+bool is_quiescent(const std::variant<std::string, py::bytes>& sfen_input) {
+    Position pos;
+    StateInfo si;
+
+    if (std::holds_alternative<std::string>(sfen_input)) {
+        pos.set(std::get<std::string>(sfen_input), &si);
+    } else {
+        py::bytes bytes_data = std::get<py::bytes>(sfen_input);
+        std::string s = bytes_data;
+        if (s.size() != 32) {
+            throw std::invalid_argument("PackedSfen must be 32 bytes.");
+        }
+        PackedSfen ps;
+        std::memcpy(ps.data, s.data(), 32);
+        pos.set_from_packed_sfen(ps, &si);
+    }
+
+    // 1. 王手がかかっているか
+    if (pos.checkers()) {
+        return false;
+    }
+
+    // 2. 駒を取る手があるか
+    // CAPTURES は駒を取る指し手を生成する
+    if (MoveList<CAPTURES>(pos).size() > 0) {
+        return false;
+    }
+
+    // 3. 王手となる手があるか
+    // CHECKS は王手となる指し手を生成する
+    if (MoveList<CHECKS>(pos).size() > 0) {
+        return false;
+    }
+
+    return true;
+}
 
 py::list get_legal_moves_info(const std::string& sfen_str) {
     py::list results;
@@ -134,4 +175,9 @@ PYBIND11_MODULE(core, m) {
     m.def("solve_mate", &solve_mate,
           "Solve mate problem for a given SFEN position.",
           py::arg("sfen"), py::arg("nodes_limit") = 1000000);
+
+    // --- 静止局面判定 ---
+    m.def("is_quiescent", &is_quiescent,
+          "Check if a given SFEN or PackedSfen is quiescent.",
+          py::arg("sfen_input"));
 }
