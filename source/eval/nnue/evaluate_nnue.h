@@ -31,13 +31,9 @@ namespace Eval::NNUE {
 	extern LargePagePtr<FeatureTransformer> feature_transformer;
 
 	// 評価関数
-#if defined(SFNNwoPSQT)
+	// LayerStacks は architecture 側の定義を常に使う。
 	constexpr int kLayerStacks = LayerStacks;
-	extern AlignedPtr<Network> network[kLayerStacks];
-#else
-	constexpr int kLayerStacks = 1;
 	extern AlignedPtr<Network> network;
-#endif
 
 	// 評価関数ファイル名
 	extern const char* const kFileName;

@@ -365,8 +365,8 @@ namespace {
             npm += (pos.count<ppc>(WHITE) + pos.count<ppc>(BLACK)) * PieceValues[pc];
         }
 
-        // インデックス計算式: (16384 - npm) * 8 / 16384
-        int idx = (16384 - npm) * 8 / 16384;
+        // インデックス計算式: (16384 - npm) * kLayerStacks / 16384
+        int idx = (16384 - npm) * kLayerStacks / 16384;
 
         if (idx < 0) idx = 0;
         if (idx >= kLayerStacks) idx = kLayerStacks - 1;
