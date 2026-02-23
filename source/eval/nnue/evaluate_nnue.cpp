@@ -233,13 +233,7 @@ namespace {
 		// 評価関数パラメータを初期化する
 		void Initialize() {
 			Detail::Initialize<FeatureTransformer>(feature_transformer);
-			if (kLayerStacks > 1) {
-				for (int i = 0; i < kLayerStacks; ++i) {
-					Detail::Initialize<Network>(network[i]);
-				}
-			} else {
-				Detail::Initialize<Network>(network);
-			}
+			Detail::Initialize<Network>(network);
 		}
 	
 		}  // namespace
@@ -299,14 +293,7 @@ namespace {
 			std::uint32_t fc_hash;
 			stream.read(reinterpret_cast<char*>(&fc_hash), sizeof(fc_hash));
 
-			if (kLayerStacks > 1) {
-				// LayerStack (L1) 8つのバケットを連続して読み込む
-				for (int i = 0; i < kLayerStacks; ++i) {
-					if (!network->fc_0[i].ReadParameters(stream).is_ok()) return Tools::ResultCode::FileReadError;
-				}
-			} else {
-				if (!network->fc_0.ReadParameters(stream).is_ok()) return Tools::ResultCode::FileReadError;
-			}
+			if (!network->fc_0.ReadParameters(stream).is_ok()) return Tools::ResultCode::FileReadError;
 			
 			// L2, Output層 (共通) の読み込み
 			if (!network->fc_1.ReadParameters(stream).is_ok()) return Tools::ResultCode::FileReadError;
@@ -327,13 +314,7 @@ namespace {
 		std::uint32_t fc_hash = 0; // 適宜計算
 		stream.write(reinterpret_cast<char*>(&fc_hash), sizeof(fc_hash));
 
-		if (kLayerStacks > 1) {
-			for (int i = 0; i < kLayerStacks; ++i) {
-				if (!network->fc_0[i].WriteParameters(stream)) return false;
-			}
-		} else {
-			if (!network->fc_0.WriteParameters(stream)) return false;
-		}
+		if (!network->fc_0.WriteParameters(stream)) return false;
 
 		if (!network->fc_1.WriteParameters(stream)) return false;
 		if (!network->fc_2.WriteParameters(stream)) return false;
@@ -344,33 +325,6 @@ namespace {
     // 差分計算ができるなら進める
     static void UpdateAccumulatorIfPossible(const Position& pos) {
         feature_transformer->UpdateAccumulatorIfPossible(pos);
-    }
-
-    // 指示書に基づくバケッティング専用のNPM計算
-    static int stack_index_for_nnue(const Position& pos) {
-        // 指示された駒価値: 香:430, 桂:581, 銀:716, 金:782, 角:1008, 飛:1193
-        // 成り駒は元の駒と同じ。
-        static constexpr int PieceValues[] = {
-            0, 0, 430, 581, 716, 782, 1008, 1193, // 先手歩〜飛
-            0, 0, 430, 581, 716, 782, 1008, 1193, // 先手成香〜龍
-            0, 0, 430, 581, 716, 782, 1008, 1193, // 後手
-            0, 0, 430, 581, 716, 782, 1008, 1193  // 後手
-        };
-
-        int npm = 0;
-        for (Piece pc = LANCE; pc <= ROOK; ++pc) {
-            npm += (pos.count<pc>(WHITE) + pos.count<pc>(BLACK)) * PieceValues[pc];
-            // 成り駒も加算 (成り駒は PIECE_PROMOTE が足されたインデックスにある)
-            Piece ppc = Piece(pc + PIECE_PROMOTE);
-            npm += (pos.count<ppc>(WHITE) + pos.count<ppc>(BLACK)) * PieceValues[pc];
-        }
-
-        // インデックス計算式: (16384 - npm) * 8 / 16384
-        int idx = (16384 - npm) * 8 / 16384;
-
-        if (idx < 0) idx = 0;
-        if (idx >= kLayerStacks) idx = kLayerStacks - 1;
-        return idx;
     }
 
     // 評価値を計算する
@@ -385,8 +339,7 @@ namespace {
         feature_transformer->Transform(pos, transformed_features, refresh);
         alignas(kCacheLineSize) char buffer[Network::kBufferSize];
 
-        const auto bucket = kLayerStacks > 1 ? stack_index_for_nnue(pos) : 0;
-        const auto output = network->Propagate(transformed_features, buffer, bucket);
+        const auto output = network->Propagate(transformed_features, buffer);
 
         // 仕様書 4項: FinalScore = NNUE_Output + (SideToMove_PSQT - Opponent_PSQT)
         // 今回の指示では PSQT 重みは別途読み込むか、既存のものを利用する。

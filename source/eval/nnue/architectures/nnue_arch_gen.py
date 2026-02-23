@@ -245,7 +245,7 @@ header += raw_features
 
 # レイヤ情報
 # 例えば、"256x2_32_32" ならば ["256x2","32","32"]のように分解される。
-#   (SFNNで) "1536-15-32-ls9" なら ["1536","15","32","9"]のように分解される。(はず)
+#   (SFNNで) "1536-15-32-ls9" なら ["1536","15","32","9"]のように分解される。
 layers = arches[1:]
 layers[0] = layers[0].lower()
 
@@ -261,9 +261,6 @@ if SFNN:
         // Number of input feature dimensions after conversion
         // 変換後の入力特徴量の次元数
         constexpr IndexType kTransformedFeatureDimensions = {layers[0]};
-
-        // Number of networks stored in the evaluation file
-        constexpr int LayerStacks = {layers[3]};
 
         // 各層の次元数
         constexpr IndexType kInputDims   = kTransformedFeatureDimensions;

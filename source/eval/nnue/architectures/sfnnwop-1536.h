@@ -25,9 +25,6 @@ using RawFeatures = Features::FeatureSet<
 // 変換後の入力特徴量の次元数
 constexpr IndexType kTransformedFeatureDimensions = 1536;
 
-// Number of networks stored in the evaluation file
-constexpr int LayerStacks = 9;
-
 // 各層の次元数
 constexpr IndexType kInputDims   = kTransformedFeatureDimensions;
 constexpr IndexType kHidden1Dims = 15;

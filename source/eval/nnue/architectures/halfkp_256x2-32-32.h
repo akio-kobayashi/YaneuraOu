@@ -23,14 +23,11 @@ using RawFeatures = Features::FeatureSet<
 // 変換後の入力特徴量の次元数
 constexpr IndexType kTransformedFeatureDimensions = 256;
 
-// Number of networks stored in the evaluation file
-constexpr int LayerStacks = 8;
-
 namespace Layers {
 
 // Define layers
 using InputLayer = InputSlice<kTransformedFeatureDimensions * 2>;
-// 仕様: Descriptionより L1出力=8, L2出力=96, L3出力=1
+// 仕様: L1出力=8, L2出力=96, L3出力=1
 using L1 = AffineTransformSparseInput<InputLayer, 8>; 
 using L2 = AffineTransform<SqrClippedReLU<L1>, 96>;
 using L3 = AffineTransform<ClippedReLU<L2>, 1>;
@@ -38,9 +35,8 @@ using L3 = AffineTransform<ClippedReLU<L2>, 1>;
 }  // namespace Layers
 
 struct Network {
-    // ネットワーク構造の定義
-    // 仕様に基づき L1 (fc_0) のみをスタック化する
-    Layers::L1 fc_0[LayerStacks];
+    // 標準構成
+    Layers::L1 fc_0;
     Layers::L2 fc_1;
     Layers::L3 fc_2;
 
@@ -52,8 +48,7 @@ struct Network {
     }
 
     static std::string GetStructureString() {
-        // 仕様書の例に合わせる
-        return "LayerStack[8x8<-2048](InputSlice[2048](0:2048))";
+        return "AffineTransform[1<-96](ClippedReLU[96](AffineTransform[96<-8](ClippedReLU[8](AffineTransform[8<-2048](InputSlice[2048](0:2048))))))";
     }
 
     struct alignas(kCacheLineSize) Buffer {
@@ -66,11 +61,10 @@ struct Network {
 
     static constexpr std::size_t kBufferSize = sizeof(Buffer);
 
-    const OutputType* Propagate(const TransformedFeatureType* transformedFeatures, char* buffer, int bucket = 0) const {
+    const OutputType* Propagate(const TransformedFeatureType* transformedFeatures, char* buffer) const {
         auto& buf = *reinterpret_cast<Buffer*>(buffer);
 
-        // 仕様に基づき、選択されたバケットのL1を使用
-        fc_0[bucket].Propagate(transformedFeatures, buf.fc_0_out);
+        fc_0.Propagate(transformedFeatures, buf.fc_0_out);
         
         // SCReLU (SqrClippedReLU) 適用 (指示書 3項)
         Layers::SqrClippedReLU<Layers::L1> ac_0;
