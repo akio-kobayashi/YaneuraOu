@@ -250,3 +250,6 @@ _Pvt_Extensions/
 ModelManifest.xml
 source/eval/nn.bin
 *.7z
+
+yaneuraou_python/.DS_Store
+*/.DS_Store
