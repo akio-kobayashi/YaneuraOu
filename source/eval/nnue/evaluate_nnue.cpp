@@ -230,17 +230,11 @@ namespace {
 
 		}  // namespace Detail
 	
-		// 評価関数パラメータを初期化する
-		void Initialize() {
-			Detail::Initialize<FeatureTransformer>(feature_transformer);
-			if (kLayerStacks > 1) {
-				for (int i = 0; i < kLayerStacks; ++i) {
-					Detail::Initialize<Network>(network[i]);
-				}
-			} else {
+			// 評価関数パラメータを初期化する
+			void Initialize() {
+				Detail::Initialize<FeatureTransformer>(feature_transformer);
 				Detail::Initialize<Network>(network);
 			}
-		}
 	
 		}  // namespace
     // ヘッダを読み込む
@@ -347,23 +341,29 @@ namespace {
     }
 
     // 指示書に基づくバケッティング専用のNPM計算
-    static int stack_index_for_nnue(const Position& pos) {
-        // 指示された駒価値: 香:430, 桂:581, 銀:716, 金:782, 角:1008, 飛:1193
-        // 成り駒は元の駒と同じ。
-        static constexpr int PieceValues[] = {
-            0, 0, 430, 581, 716, 782, 1008, 1193, // 先手歩〜飛
-            0, 0, 430, 581, 716, 782, 1008, 1193, // 先手成香〜龍
-            0, 0, 430, 581, 716, 782, 1008, 1193, // 後手
-            0, 0, 430, 581, 716, 782, 1008, 1193  // 後手
-        };
+	    static int stack_index_for_nnue(const Position& pos) {
+	        // 指示された駒価値: 香:430, 桂:581, 銀:716, 金:782, 角:1008, 飛:1193
+	        // 成り駒は元の駒と同じ駒価値として加算する。
+	        static constexpr struct {
+	            PieceType base;
+	            PieceType promoted;
+	            int value;
+	        } kNpmPieces[] = {
+	            { LANCE,  PRO_LANCE,  430 },
+	            { KNIGHT, PRO_KNIGHT, 581 },
+	            { SILVER, PRO_SILVER, 716 },
+	            { GOLD,   NO_PIECE_TYPE, 782 },
+	            { BISHOP, HORSE,      1008 },
+	            { ROOK,   DRAGON,     1193 },
+	        };
 
-        int npm = 0;
-        for (Piece pc = LANCE; pc <= ROOK; ++pc) {
-            npm += (pos.count<pc>(WHITE) + pos.count<pc>(BLACK)) * PieceValues[pc];
-            // 成り駒も加算 (成り駒は PIECE_PROMOTE が足されたインデックスにある)
-            Piece ppc = Piece(pc + PIECE_PROMOTE);
-            npm += (pos.count<ppc>(WHITE) + pos.count<ppc>(BLACK)) * PieceValues[pc];
-        }
+	        int npm = 0;
+	        for (const auto& entry : kNpmPieces) {
+	            npm += (popcount(pos.pieces(WHITE, entry.base)) + popcount(pos.pieces(BLACK, entry.base))) * entry.value;
+	            if (entry.promoted != NO_PIECE_TYPE) {
+	                npm += (popcount(pos.pieces(WHITE, entry.promoted)) + popcount(pos.pieces(BLACK, entry.promoted))) * entry.value;
+	            }
+	        }
 
         // インデックス計算式: (16384 - npm) * kLayerStacks / 16384
         int idx = (16384 - npm) * kLayerStacks / 16384;
@@ -388,38 +388,14 @@ namespace {
         const auto bucket = kLayerStacks > 1 ? stack_index_for_nnue(pos) : 0;
         const auto output = network->Propagate(transformed_features, buffer, bucket);
 
-        // 仕様書 4項: FinalScore = NNUE_Output + (SideToMove_PSQT - Opponent_PSQT)
-        // 今回の指示では PSQT 重みは別途読み込むか、既存のものを利用する。
-        // ここでは NNUE 出力を基本とし、PSQT パスを合算する。
-        Value score = (Value)output[0];
+	        // VALUE_MAX_EVALより大きな値が返ると探索が不安定になるためクリップする。
+	        auto score = static_cast<Value>(output[0] / FV_SCALE);
+	        score = Math::clamp(score, -VALUE_MAX_EVAL, VALUE_MAX_EVAL);
 
-        // TODO: PSQTパスの重みが読み込めている場合はここで加算する。
-        // 現状はNNUE出力(FV_SCALE)を返す。
-        return score;
-    }
-
-        // VALUE_MAX_EVALより大きな値が返ってくるとaspiration searchがfail highして
-        // 探索が終わらなくなるのでVALUE_MAX_EVAL以下であることを保証すべき。
-
-        // この現象が起きても、対局時に秒固定などだとそこで探索が打ち切られるので、
-        // 1つ前のiterationのときの最善手がbestmoveとして指されるので見かけ上、
-        // 問題ない。このVALUE_MAX_EVALが返ってくるような状況は、ほぼ詰みの局面であり、
-        // そのような詰みの局面が出現するのは終盤で形勢に大差がついていることが多いので
-        // 勝敗にはあまり影響しない。
-
-        // しかし、教師生成時などdepth固定で探索するときに探索から戻ってこなくなるので
-        // そのスレッドの計算時間を無駄にする。またdepth固定対局でtime-outするようになる。
-
-        auto score = static_cast<Value>(output[0] / FV_SCALE);
-
-        // 1) ここ、下手にclipすると学習時には影響があるような気もするが…。
-        // 2) accumulator.scoreは、差分計算の時に用いないので書き換えて問題ない。
-        score = Math::clamp(score, -VALUE_MAX_EVAL, VALUE_MAX_EVAL);
-
-        accumulator.score = score;
-        accumulator.computed_score = true;
-        return accumulator.score;
-    }
+	        accumulator.score = score;
+	        accumulator.computed_score = true;
+	        return score;
+	    }
 
 }  // namespace NNUE
 
