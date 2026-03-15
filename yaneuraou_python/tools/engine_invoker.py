@@ -1,5 +1,6 @@
 import argparse
 import datetime
+import json
 import math
 import os.path
 import random
@@ -67,8 +68,50 @@ def output_rating(win,draw,lose,win_black,win_white,opt2):
 	sys.stdout.flush()
 
 
+def parse_usi_score_info(line):
+	parts = line.strip().split()
+	result = {
+		"multipv": 1,
+		"score_type": None,
+		"score": None,
+		"normalized_score": "",
+		"pv": [],
+	}
+
+	for i in range(len(parts)):
+		if parts[i] == "multipv" and i + 1 < len(parts):
+			try:
+				result["multipv"] = int(parts[i + 1])
+			except ValueError:
+				pass
+		elif parts[i] == "score" and i + 2 < len(parts):
+			score_type = parts[i + 1]
+			try:
+				score = int(parts[i + 2])
+			except ValueError:
+				return None
+			result["score_type"] = score_type
+			result["score"] = score
+			if score_type == "cp":
+				result["normalized_score"] = str(score)
+			elif score_type == "mate":
+				if score >= 0:
+					result["normalized_score"] = str(32000 - score)
+				else:
+					result["normalized_score"] = str(-32000 + score)
+			else:
+				result["normalized_score"] = "?"
+		elif parts[i] == "pv" and i + 1 < len(parts):
+			result["pv"] = parts[i + 1:]
+			break
+
+	if result["score_type"] is None:
+		return None
+	return result
+
+
 # 思考エンジンに対するオプションを生成する。
-def create_option(engines,engine_threads,evals,times,hashes,PARAMETERS_LOG_FILE_PATH):
+def create_option(engines,engine_threads,evals,times,hashes,multipv,PARAMETERS_LOG_FILE_PATH):
 
 	# 思考エンジンに対するコマンド列を保存する。
 	options = []
@@ -125,6 +168,7 @@ def create_option(engines,engine_threads,evals,times,hashes,PARAMETERS_LOG_FILE_
 			option.append("setoption name EvalDir value " + evals[i])
 			option.append("setoption name Hash value " + str(hashes[i]))
 			option.append("setoption name BookFile value no_book")
+			option.append("setoption name MultiPV value " + str(multipv))
 			option.append("setoption MinimumThinkingTime value 1000")
 			option.append("setoption name NetworkDelay value 0")
 			option.append("setoption name NetworkDelay2 value 0")
@@ -194,7 +238,7 @@ def read_engine_output(engine_idx, proc, message_queue):
 #  book_sfens : 定跡
 #  opt2       : 勝敗の表示の先頭にT2,b2000 のように対局条件を文字列化して突っ込む用。
 #  book_moves : 定跡の手数
-def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_moves):
+def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_moves,save_candidates):
 
 	win = lose = draw = 0
 	win_black = win_white = 0
@@ -209,6 +253,7 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 	# 対局ごとの状態
 	sfens = [""] * threads
 	eval_values = [""] * threads
+	candidate_values = [[] for _ in range(threads)]
 	moves = [0] * threads
 	turns = [0] * threads
 
@@ -223,6 +268,7 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 	nodes_str = [""] * (threads * 2)
 	nodes = [0] * (threads * 2)
 	eval_value_from_thread = [""] * (threads * 2)
+	candidate_info_from_thread = [{} for _ in range(threads * 2)]
 	term_procs = [False] * (threads * 2)
 
 	# --- エンジン起動とリーダー・スレッド開始 ---
@@ -283,6 +329,9 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 
 	if KifOutput:
 		kif_file = open(now.strftime("%Y%m%d%H%M%S") + opt2.replace(",","_") + ".sfen","w")
+	candidate_file = None
+	if save_candidates:
+		candidate_file = open(now.strftime("%Y%m%d%H%M%S") + opt2.replace(",","_") + ".jsonl","w")
 
 	def send_cmd(i,s):
 		p = procs[i]
@@ -311,6 +360,7 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 		cmd = options[i & 1][0]
 		cmd = cmd.replace("REST_TIME",str(rest_times[i]))
 		send_cmd(i,cmd)
+		candidate_info_from_thread[i] = {}
 
 		# changes state
 		states[i]   = EngineState.WAIT_FOR_BESTMOVE
@@ -323,6 +373,7 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 		send_cmd(i,"usinewgame")
 		sfens[i/2] = book_sfens[sfen_no]
 		moves[i/2] = 0
+		candidate_values[i//2] = []
 		# 定跡の評価値はよくわからんので0にしとくしかない。
 		eval_values[i/2] = "0 "*book_moves
 
@@ -390,6 +441,10 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 				# 評価値計測用
 				if "score" in line :
 					eval_value_from_thread[engine_idx] = line
+					if save_candidates and " pv " in line:
+						parsed = parse_usi_score_info(line)
+						if parsed:
+							candidate_info_from_thread[engine_idx][parsed["multipv"]] = parsed
 
 				gameover = GameResult.NO_RESULT # ゲームオーバーフラグ
 
@@ -422,26 +477,13 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 								break
 					
 					# 評価値の計測用
-					vs = eval_value_from_thread[engine_idx].split()
-					for j in range(len(vs)):
-						if vs[j] == "score":
-							if j+2 < len(vs):
-								try:
-									v = int(vs[j+2])
-								except:
-									print(f"Error : score = {eval_value_from_thread[engine_idx]}")
-									eval_value_from_thread[engine_idx] = ""
-
-								if vs[j+1] == "cp" :
-									eval_value_from_thread[engine_idx] = str(v)
-								elif vs[j+1] == "mate" :
-									if v >= 0:
-										eval_value_from_thread[engine_idx] = str(32000 - v)
-									else:
-										eval_value_from_thread[engine_idx] = str(-32000 + v)
-							else:
-								eval_value_from_thread[engine_idx] = "?"
-							break
+					parsed_eval = parse_usi_score_info(eval_value_from_thread[engine_idx])
+					if parsed_eval:
+						eval_value_from_thread[engine_idx] = parsed_eval["normalized_score"]
+					else:
+						if eval_value_from_thread[engine_idx]:
+							print(f"Error : score = {eval_value_from_thread[engine_idx]}")
+						eval_value_from_thread[engine_idx] = ""
 
 					# if (not random time)
 					if options[2][3]==0:
@@ -494,6 +536,18 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 							sfens[engine_idx//2] += ss[1] # 指し手を追加
 							if KifOutput:
 								eval_values[engine_idx//2] += eval_value_from_thread[engine_idx] + " "
+							if save_candidates:
+								candidates = []
+								for key in sorted(candidate_info_from_thread[engine_idx].keys()):
+									candidate = candidate_info_from_thread[engine_idx][key]
+									candidates.append({
+										"multipv": candidate["multipv"],
+										"score_type": candidate["score_type"],
+										"score": candidate["score"],
+										"normalized_score": candidate["normalized_score"],
+										"pv": candidate["pv"],
+									})
+								candidate_values[engine_idx//2].append(candidates)
 						except:
 							outlog(engine_idx, "Error! " + line)
 
@@ -511,6 +565,14 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 					if KifOutput:
 						kif_file.write("startpos moves " + sfens[engine_idx//2] + "\n")
 						kif_file.write(eval_values[engine_idx//2] + "\n")
+					if candidate_file:
+						record = {
+							"moves": sfens[engine_idx//2].split(),
+							"eval_values": eval_values[engine_idx//2].split(),
+							"candidates": candidate_values[engine_idx//2],
+							"result": gameover.name,
+						}
+						candidate_file.write(json.dumps(record, ensure_ascii=False) + "\n")
 					turns[engine_idx//2] = turns[engine_idx//2] ^ 1 # 手番を交代
 
 			elif message['type'] == 'terminated':
@@ -565,6 +627,8 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 					log_file.close()
 				if KifOutput:
 					kif_file.close()
+				if candidate_file:
+					candidate_file.close()
 				return win, lose, draw, win_black, win_white
 
 			# 一定回数ごとに途中結果を出力
@@ -624,6 +688,7 @@ def main():
 	parser.add_argument('--time', type=str, default="b1000", help="Time control settings (e.g., 'b1000', 'r100', 't300000/i3000').")
 	parser.add_argument('--hash1', type=str, default="128", help="Hash size for engine 1 (in MB).")
 	parser.add_argument('--hash2', type=str, default="128", help="Hash size for engine 2 (in MB).")
+	parser.add_argument('--multipv', type=int, default=1, help="Number of candidate lines to request from the engine.")
 
 	# --- Opening book settings ---
 	parser.add_argument('--book_moves', type=int, default=24, help="Number of moves to follow from the opening book.")
@@ -632,6 +697,7 @@ def main():
 	# --- Logging settings ---
 	parser.add_argument('--log', action='store_true', help="Enable file logging for engine communication.")
 	parser.add_argument('--param_log_path', type=str, default="", help="Enable and specify path for parameter logging.")
+	parser.add_argument('--save_candidates', action='store_true', help="Save MultiPV candidate lists to a JSONL sidecar file.")
 	
 	args = parser.parse_args()
 
@@ -680,30 +746,33 @@ def main():
 	eval1_path = config['eval1']
 	eval2_path = config['eval2']
 	book_moves = config['book_moves']
+	multipv = config['multipv']
 	play_time_list = config['time'].split(",")
 	PARAMETERS_LOG_FILE_PATH = config['param_log_path']
 	rand_book = config['rand_book']
 	fileLogging = config['log']
+	save_candidates = config['save_candidates']
 
 # expand eval_dir
+	evaldirs = []
+	if not os.path.exists(os.path.join(home, eval2_path, "0")) :
+		evaldirs.append(eval2_path)
+	else:
+		i = 0
+		while os.path.exists(os.path.join(home, eval2_path, str(i))):
+			evaldirs.append(os.path.join(eval2_path, str(i)))
+			i += 1
 
-evaldirs = []
-if not os.path.exists(os.path.join(home, eval2_path, "0")) :
-	evaldirs.append(eval2_path)
-else:
-	i = 0
-	while os.path.exists(os.path.join(home, eval2_path, str(i))):
-		evaldirs.append(os.path.join(eval2_path, str(i)))
-		i += 1
-
-print("home           : " , home)
-print("play_time_list : " , play_time_list)
-print("evaldirs       : " , evaldirs)
-print("hash size      : " , hashes)
-print("book_moves     : " , book_moves)
-print("engine_threads : " , engine_threads)
-print("rand_book      : " , rand_book)
+	print("home           : " , home)
+	print("play_time_list : " , play_time_list)
+	print("evaldirs       : " , evaldirs)
+	print("hash size      : " , hashes)
+	print("book_moves     : " , book_moves)
+	print("multipv        : " , multipv)
+	print("engine_threads : " , engine_threads)
+	print("rand_book      : " , rand_book)
 	print("PARAMETERS_LOG_FILE_PATH : " , PARAMETERS_LOG_FILE_PATH)
+	print("save_candidates: " , save_candidates)
 
 	total_win = total_lose = total_draw = 0
 	total_win_black = total_win_white = 0
@@ -734,7 +803,6 @@ print("rand_book      : " , rand_book)
 
 	# threadsはparallel_gamesに相当。 engine_threadsはエンジンに渡すスレッド数。
 	# 古いthreads = threads // engine_threads の行は不要。
-
 	for evaldir in evaldirs:
 
 		engine1 = engine_to_full(engine1_path)
@@ -751,7 +819,7 @@ print("rand_book      : " , rand_book)
 		for play_time in play_time_list:
 			print("\nthreads = " + str(threads) + " , loop = " + str(loop) + " , play_time = " + play_time)
 
-			options = create_option(engines,engine_threads,evals_full,play_time,hashes,PARAMETERS_LOG_FILE_PATH)
+			options = create_option(engines,engine_threads,evals_full,play_time,hashes,multipv,PARAMETERS_LOG_FILE_PATH)
 
 			for i in range(2):
 				print("option " + str(i+1) + " = " + ' / '.join(options[i]))
@@ -762,7 +830,7 @@ print("rand_book      : " , rand_book)
 			# 短くスレッド数と秒読み条件を文字列化
 			opt2 = "T"+str(engine_threads) + "," + play_time
 
-			w, l, d, wb, ww = vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_moves)
+			w, l, d, wb, ww = vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_moves,save_candidates)
 
 			total_win += w
 			total_lose += l
@@ -777,3 +845,6 @@ print("rand_book      : " , rand_book)
 #			print "play_time = " + play_time + " , " ,
 			output_rating(total_win, total_draw, total_lose, total_win_black, total_win_white, opt2)
 
+
+if __name__ == "__main__":
+	main()
