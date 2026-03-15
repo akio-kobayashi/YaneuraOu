@@ -225,6 +225,22 @@ Purpose:
 - make it explicit that `ttData.value` belongs to the search-score domain, not the normalized-static-eval domain
 - centralize TT score decoding and cutoff-bound interpretation for both main search and qsearch
 
+### Slice 7: TT writeback and repetition/max-move draw scores use named helpers
+
+Implemented in:
+- [`yaneuraou-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.cpp)
+
+Added helpers:
+- `search_score_for_tt_storage(...)`
+- `tt_bound_for_completed_search_result(...)`
+- `tt_bound_for_non_exact_search_result(...)`
+- `repetition_search_score(...)`
+- `max_move_draw_search_score(...)`
+
+Purpose:
+- make TT writeback explicitly operate in the search-score domain instead of repeating inline `value_to_tt(...)` conversions and bound selection rules
+- centralize repetition and max-move draw outcomes as search-score helpers, including cases where draw handling can return mate-like values
+
 ## Non-Goals For The First Pass
 
 Do not start by:

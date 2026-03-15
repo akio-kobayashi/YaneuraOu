@@ -157,6 +157,7 @@ Rationale:
 - Migrate fail-low bonus and correction-history updates to named helpers that explicitly consume search-outcome versus normalized-static-eval deltas.
 - Migrate qsearch stand-pat updates and qsearch capture-futility estimates to named helpers.
 - Migrate TT score decoding and TT cutoff-bound interpretation to named search-score helpers shared by main search and qsearch.
+- Migrate TT writeback, TT bound selection, and repetition/max-move draw outcomes to named search-score helpers.
 
 ### Phase B: Create stable interfaces
 - Introduce evaluator-facing interfaces and compatibility wrappers.

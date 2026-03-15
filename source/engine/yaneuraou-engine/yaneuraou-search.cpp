@@ -711,6 +711,41 @@ bool tt_bound_allows_search_score_cutoff(const Value ttSearchScore,
            && (ttBound & (ttSearchScore >= beta ? BOUND_LOWER : BOUND_UPPER));
 }
 
+Value value_draw(size_t nodes);
+
+Value search_score_for_tt_storage(const Value searchScore, const int ply) {
+    return value_to_tt(searchScore, ply);
+}
+
+Bound tt_bound_for_completed_search_result(const Value bestValue,
+                                           const Value beta,
+                                           const bool  pvNode,
+                                           const bool  hasBestMove) {
+    return bestValue >= beta    ? BOUND_LOWER
+           : pvNode && hasBestMove ? BOUND_EXACT
+                                   : BOUND_UPPER;
+}
+
+Bound tt_bound_for_non_exact_search_result(const Value bestValue, const Value beta) {
+    return bestValue >= beta ? BOUND_LOWER : BOUND_UPPER;
+}
+
+Value repetition_search_score(const RepetitionState drawType,
+                              const Color           sideToMove,
+                              const int             ply,
+                              const size_t          nodes) {
+    const Value baseDrawScore = draw_value(drawType, sideToMove);
+
+    if (drawType == REPETITION_DRAW)
+        return baseDrawScore + value_draw(nodes);
+
+    return value_from_tt(baseDrawScore, ply);
+}
+
+Value max_move_draw_search_score(const Color sideToMove, const size_t nodes) {
+    return draw_value(REPETITION_DRAW, sideToMove) + value_draw(nodes);
+}
+
 // Transitional compatibility helper. Existing code still refers to corrected static eval.
 Value to_corrected_static_eval(const Value v, const int cv) {
 	return normalize_static_eval(v, cv);
@@ -2265,20 +2300,12 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
 
 		auto draw_type = pos.is_repetition(ss->ply);
         if (draw_type != REPETITION_NONE)
-        { 
-            if (draw_type == REPETITION_DRAW)
-				// 通常の千日手の時はゆらぎを持たせる。
-				// 💡 引き分けのスコアvは abs(v±1) <= VALUE_MAX_EVALであることが保証されているので、
-				//     value_from_tt()での変換は不要。
-                return draw_value(draw_type, pos.side_to_move()) + value_draw(nodes);
-            else
-	            return value_from_tt(draw_value(draw_type, pos.side_to_move()), ss->ply);
-        }
+            return repetition_search_score(draw_type, pos.side_to_move(), ss->ply, nodes);
 
 		// 📌 将棋では手数を超えたら無条件で引き分け扱い。
         if (threads.stop.load(std::memory_order_relaxed) || ss->ply >= MAX_PLY
             || pos.game_ply() > search_options.max_moves_to_draw)
-            return draw_value(REPETITION_DRAW, pos.side_to_move()) + value_draw(nodes);
+            return max_move_draw_search_score(pos.side_to_move(), nodes);
 #endif
 
 		/*
@@ -2656,7 +2683,7 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
 
                 if (b == BOUND_EXACT || (b == BOUND_LOWER ? value >= beta : value <= alpha))
                 {
-                    ttWriter.write(posKey, value_to_tt(value, ss->ply), ss->ttPv, b,
+                    ttWriter.write(posKey, search_score_for_tt_storage(value, ss->ply), ss->ttPv, b,
                                    std::min(MAX_PLY - 1, depth + 6), Move::none(), VALUE_NONE,
                                    tt.generation());
 
@@ -3220,7 +3247,7 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
                 // Save ProbCut data into transposition table
                 // ProbCutのdataを置換表に保存する。
 
-				ttWriter.write(posKey, value_to_tt(value, ss->ply), ss->ttPv, BOUND_LOWER,
+				ttWriter.write(posKey, search_score_for_tt_storage(value, ss->ply), ss->ttPv, BOUND_LOWER,
                                probCutDepth + 1, move, unadjustedStaticEval, tt.generation());
 
                 if (!is_decisive(value))
@@ -4195,10 +4222,8 @@ moves_loop:  // When in check, search starts here
 	*/
 
     if (!excludedMove && !(rootNode && pvIdx))
-        ttWriter.write(posKey, value_to_tt(bestValue, ss->ply), ss->ttPv,
-                       bestValue >= beta    ? BOUND_LOWER
-                       : PvNode && bestMove ? BOUND_EXACT
-                                            : BOUND_UPPER,
+        ttWriter.write(posKey, search_score_for_tt_storage(bestValue, ss->ply), ss->ttPv,
+                       tt_bound_for_completed_search_result(bestValue, beta, PvNode, bool(bestMove)),
                        moveCount != 0 ? depth : std::min(MAX_PLY - 1, depth + 6), bestMove,
                        unadjustedStaticEval, tt.generation());
 
@@ -4410,9 +4435,9 @@ Value Search::YaneuraOuWorker::qsearch(Position& pos, Stack* ss, Value alpha, Va
             // 通常の千日手の時はゆらぎを持たせる。
             // 💡 引き分けのスコアvは abs(v±1) <= VALUE_MAX_EVALであることが保証されているので、
             //     value_from_tt()での変換は不要。
-            return draw_value(draw_type, pos.side_to_move()) + value_draw(nodes);
+            return repetition_search_score(draw_type, pos.side_to_move(), ss->ply, nodes);
 		else
-	        return value_from_tt(draw_value(draw_type, us), ss->ply);
+	        return repetition_search_score(draw_type, us, ss->ply, nodes);
     }
 
 // TODO : あとで検討する。
@@ -4426,7 +4451,7 @@ Value Search::YaneuraOuWorker::qsearch(Position& pos, Stack* ss, Value alpha, Va
 
     // 最大手数の到達
     if (ss->ply >= MAX_PLY || pos.game_ply() > search_options.max_moves_to_draw)
-        return draw_value(REPETITION_DRAW, us) + value_draw(nodes);
+        return max_move_draw_search_score(us, nodes);
 
     ASSERT_LV3(0 <= ss->ply && ss->ply < MAX_PLY);
 
@@ -4612,7 +4637,7 @@ Value Search::YaneuraOuWorker::qsearch(Position& pos, Stack* ss, Value alpha, Va
             bestValue = soften_qsearch_stand_pat_fail_high(bestValue, beta);
 
             if (!ss->ttHit)
-                ttWriter.write(posKey, value_to_tt(bestValue, ss->ply), false, BOUND_LOWER,
+                ttWriter.write(posKey, search_score_for_tt_storage(bestValue, ss->ply), false, BOUND_LOWER,
                                DEPTH_UNSEARCHED, Move::none(), unadjustedStaticEval,
                                tt.generation());
             return bestValue;
@@ -4922,8 +4947,8 @@ Value Search::YaneuraOuWorker::qsearch(Position& pos, Stack* ss, Value alpha, Va
 	// 📝 詰みではなかったのでこの情報を書き出す。
     //   　qsearch()の結果は信用ならないのでBOUND_EXACTで書き出すことはない。
 
-    ttWriter.write(posKey, value_to_tt(bestValue, ss->ply), pvHit,
-                   bestValue >= beta ? BOUND_LOWER : BOUND_UPPER, DEPTH_QS, bestMove,
+    ttWriter.write(posKey, search_score_for_tt_storage(bestValue, ss->ply), pvHit,
+                   tt_bound_for_non_exact_search_result(bestValue, beta), DEPTH_QS, bestMove,
                    unadjustedStaticEval, tt.generation());
 
 	/*
