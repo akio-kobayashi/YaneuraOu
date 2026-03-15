@@ -110,6 +110,59 @@ def parse_usi_score_info(line):
 	return result
 
 
+def choose_move_from_candidates(bestmove_line, candidate_info_map, alt_move_prob, alt_move_margin_cp, alt_move_temperature):
+	parts = bestmove_line.split()
+	if len(parts) < 2:
+		return None
+
+	bestmove = parts[1]
+	if alt_move_prob <= 0.0 or alt_move_margin_cp < 0:
+		return {
+			"move": bestmove,
+			"source": "bestmove",
+			"selected_multipv": 1,
+		}
+
+	top_candidate = candidate_info_map.get(1)
+	if not top_candidate or top_candidate["score_type"] != "cp" or not top_candidate["pv"]:
+		return {
+			"move": bestmove,
+			"source": "bestmove",
+			"selected_multipv": 1,
+		}
+
+	top_score = top_candidate["score"]
+	eligible_alternatives = []
+	for key in sorted(candidate_info_map.keys()):
+		if key <= 1:
+			continue
+		candidate = candidate_info_map[key]
+		if candidate["score_type"] != "cp" or not candidate["pv"]:
+			continue
+		score_gap = top_score - candidate["score"]
+		if score_gap <= alt_move_margin_cp:
+			eligible_alternatives.append(candidate)
+
+	if not eligible_alternatives or random.random() >= alt_move_prob:
+		return {
+			"move": bestmove,
+			"source": "bestmove",
+			"selected_multipv": 1,
+		}
+
+	weights = []
+	for candidate in eligible_alternatives:
+		score_gap = top_score - candidate["score"]
+		weights.append(math.exp(-score_gap / max(1.0, alt_move_temperature)))
+
+	chosen = random.choices(eligible_alternatives, weights=weights, k=1)[0]
+	return {
+		"move": chosen["pv"][0],
+		"source": "candidate",
+		"selected_multipv": chosen["multipv"],
+	}
+
+
 # 思考エンジンに対するオプションを生成する。
 def create_option(engines,engine_threads,evals,times,hashes,multipv,PARAMETERS_LOG_FILE_PATH):
 
@@ -231,7 +284,8 @@ def read_engine_output(engine_idx, proc, message_queue):
 #  book_sfens : 定跡
 #  opt2       : 勝敗の表示の先頭にT2,b2000 のように対局条件を文字列化して突っ込む用。
 #  book_moves : 定跡の手数
-def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_moves,save_candidates):
+def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_moves,save_candidates,
+		alt_move_prob, alt_move_margin_cp, alt_move_temperature):
 
 	win = lose = draw = 0
 	win_black = win_white = 0
@@ -247,6 +301,8 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 	sfens = [""] * threads
 	eval_values = [""] * threads
 	candidate_values = [[] for _ in range(threads)]
+	selected_move_meta = [[] for _ in range(threads)]
+	gameover_reasons = [""] * threads
 	moves = [0] * threads
 	turns = [0] * threads
 
@@ -367,8 +423,11 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 		sfens[i//2] = book_sfens[sfen_no]
 		moves[i//2] = 0
 		candidate_values[i//2] = []
-		# 定跡の評価値はよくわからんので0にしとくしかない。
-		eval_values[i//2] = "0 "*book_moves
+		selected_move_meta[i//2] = []
+		gameover_reasons[i//2] = ""
+		# 開始局面集を使っている時だけ、その開始手数ぶんのダミー評価値を置く。
+		initial_moves = len(book_sfens[sfen_no].split())
+		eval_values[i//2] = ("0 " * initial_moves) if initial_moves else ""
 
 	# ゲームオーバーのハンドラ
 	# i : engine index
@@ -504,6 +563,7 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 						else: # 先手エンジンが投了
 							lose += 1
 							gameover = GameResult.P2_WIN # 2P勝ち (エンジン1勝ち)
+						gameover_reasons[engine_idx//2] = "resign"
 						if (moves[engine_idx//2] & 1) == 1: # 後手番で勝った
 							win_black += 1
 						else: # 先手番で勝った
@@ -516,17 +576,26 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 						else: # 後手エンジンが勝ち宣言
 							lose += 1
 							gameover = GameResult.P2_WIN # 2P勝ち (エンジン1勝ち)
+						gameover_reasons[engine_idx//2] = "win_declaration"
 						if (moves[engine_idx//2] & 1) == 0: # 先手番で勝った
 							win_black += 1
 						else: # 後手番で勝った
 							win_white += 1
 						update = True
 					else: # 通常のbestmove
+						selected_move = choose_move_from_candidates(
+							line,
+							candidate_info_from_thread[engine_idx],
+							alt_move_prob,
+							alt_move_margin_cp,
+							alt_move_temperature,
+						)
 						ss = line.split()
 						if sfens[engine_idx//2] != "":
 							sfens[engine_idx//2] += " "
 						try:
-							sfens[engine_idx//2] += ss[1] # 指し手を追加
+							move_to_play = selected_move["move"] if selected_move else ss[1]
+							sfens[engine_idx//2] += move_to_play # 指し手を追加
 							if KifOutput:
 								eval_values[engine_idx//2] += eval_value_from_thread[engine_idx] + " "
 							if save_candidates:
@@ -541,6 +610,11 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 										"pv": candidate["pv"],
 									})
 								candidate_values[engine_idx//2].append(candidates)
+								selected_move_meta[engine_idx//2].append({
+									"move": move_to_play,
+									"source": selected_move["source"] if selected_move else "bestmove",
+									"selected_multipv": selected_move["selected_multipv"] if selected_move else 1,
+								})
 						except:
 							outlog(engine_idx, "Error! " + line)
 
@@ -548,6 +622,7 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 						if moves[engine_idx//2] >= MAX_MOVES: # 256手で引き分け
 							draw += 1
 							gameover = GameResult.DRAW # Draw
+							gameover_reasons[engine_idx//2] = "max_moves"
 							update = True
 						else:
 							go_cmd(engine_idx^1) # 相手のエンジンにgoコマンドを送る
@@ -559,11 +634,19 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 						kif_file.write("startpos moves " + sfens[engine_idx//2] + "\n")
 						kif_file.write(eval_values[engine_idx//2] + "\n")
 					if candidate_file:
+						black_engine = 1 if turns[engine_idx//2] == 0 else 2
+						white_engine = 2 if black_engine == 1 else 1
 						record = {
 							"moves": sfens[engine_idx//2].split(),
 							"eval_values": eval_values[engine_idx//2].split(),
 							"candidates": candidate_values[engine_idx//2],
+							"selected_moves": selected_move_meta[engine_idx//2],
+							"black_engine": black_engine,
+							"white_engine": white_engine,
+							"black_engine_name": os.path.basename(engines_full[black_engine - 1]),
+							"white_engine_name": os.path.basename(engines_full[white_engine - 1]),
 							"result": gameover.name,
+							"termination_reason": gameover_reasons[engine_idx//2],
 						}
 						candidate_file.write(json.dumps(record, ensure_ascii=False) + "\n")
 					turns[engine_idx//2] = turns[engine_idx//2] ^ 1 # 手番を交代
@@ -600,6 +683,7 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 					lose += 1
 				else: # エンジン1がタイムアウト -> エンジン0の勝ち
 					win += 1
+				gameover_reasons[i//2] = "timeout"
 				update = True # 状態変化として扱う
 				# タイムアウトした対局を終了させる
 				gameover_cmd(i, GameResult.DRAW)
@@ -682,6 +766,9 @@ def main():
 	parser.add_argument('--hash1', type=str, default="128", help="Hash size for engine 1 (in MB).")
 	parser.add_argument('--hash2', type=str, default="128", help="Hash size for engine 2 (in MB).")
 	parser.add_argument('--multipv', type=int, default=1, help="Number of candidate lines to request from the engine.")
+	parser.add_argument('--alt_move_prob', type=float, default=0.0, help="Probability of selecting a non-best candidate move when a close alternative exists.")
+	parser.add_argument('--alt_move_margin_cp', type=int, default=-1, help="Maximum centipawn gap from the top candidate for alternative move selection. Negative disables it.")
+	parser.add_argument('--alt_move_temperature', type=float, default=12.0, help="Sampling temperature for close alternative candidate moves.")
 
 	# --- Opening book settings ---
 	parser.add_argument('--book_file', type=str, default="", help="Optional opening SFEN file under home/book or an absolute path. If omitted, games start from the initial position.")
@@ -742,6 +829,9 @@ def main():
 	book_file_path = config['book_file']
 	book_moves = config['book_moves']
 	multipv = config['multipv']
+	alt_move_prob = config['alt_move_prob']
+	alt_move_margin_cp = config['alt_move_margin_cp']
+	alt_move_temperature = config['alt_move_temperature']
 	play_time_list = config['time'].split(",")
 	PARAMETERS_LOG_FILE_PATH = config['param_log_path']
 	rand_book = config['rand_book']
@@ -765,6 +855,9 @@ def main():
 	print("book_file      : " , book_file_path if book_file_path else "(initial position)")
 	print("book_moves     : " , book_moves if book_file_path else "(disabled)")
 	print("multipv        : " , multipv)
+	print("alt_move_prob  : " , alt_move_prob)
+	print("alt_move_margin_cp : " , alt_move_margin_cp)
+	print("alt_move_temperature : " , alt_move_temperature)
 	print("engine_threads : " , engine_threads)
 	print("rand_book      : " , rand_book)
 	print("PARAMETERS_LOG_FILE_PATH : " , PARAMETERS_LOG_FILE_PATH)
@@ -833,7 +926,20 @@ def main():
 			# 短くスレッド数と秒読み条件を文字列化
 			opt2 = "T"+str(engine_threads) + "," + play_time
 
-			w, l, d, wb, ww = vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_moves,save_candidates)
+			w, l, d, wb, ww = vs_match(
+				engines_full,
+				options,
+				threads,
+				loop,
+				book_sfens,
+				fileLogging,
+				opt2,
+				book_moves,
+				save_candidates,
+				alt_move_prob,
+				alt_move_margin_cp,
+				alt_move_temperature,
+			)
 
 			total_win += w
 			total_lose += l
