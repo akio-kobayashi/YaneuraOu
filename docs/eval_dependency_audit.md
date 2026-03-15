@@ -241,6 +241,20 @@ Purpose:
 - make TT writeback explicitly operate in the search-score domain instead of repeating inline `value_to_tt(...)` conversions and bound selection rules
 - centralize repetition and max-move draw outcomes as search-score helpers, including cases where draw handling can return mate-like values
 
+### Slice 8: terminal draw and no-legal-move outcomes use named search-score helpers
+
+Implemented in:
+- [`yaneuraou-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.cpp)
+
+Added helpers:
+- `plain_draw_search_score()`
+- `search_score_is_below_draw(...)`
+- `no_legal_move_search_score(...)`
+
+Purpose:
+- make plain draw outcomes explicit in the search-score domain instead of scattering `VALUE_DRAW`
+- make no-legal-move terminal returns use a named helper that distinguishes excluded-move, mate, and draw cases
+
 ## Non-Goals For The First Pass
 
 Do not start by:

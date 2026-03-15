@@ -158,6 +158,7 @@ Rationale:
 - Migrate qsearch stand-pat updates and qsearch capture-futility estimates to named helpers.
 - Migrate TT score decoding and TT cutoff-bound interpretation to named search-score helpers shared by main search and qsearch.
 - Migrate TT writeback, TT bound selection, and repetition/max-move draw outcomes to named search-score helpers.
+- Migrate terminal draw and no-legal-move outcomes to named search-score helpers.
 
 ### Phase B: Create stable interfaces
 - Introduce evaluator-facing interfaces and compatibility wrappers.

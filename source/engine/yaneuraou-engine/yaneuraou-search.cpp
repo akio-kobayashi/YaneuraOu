@@ -746,6 +746,19 @@ Value max_move_draw_search_score(const Color sideToMove, const size_t nodes) {
     return draw_value(REPETITION_DRAW, sideToMove) + value_draw(nodes);
 }
 
+Value plain_draw_search_score() { return VALUE_DRAW; }
+
+bool search_score_is_below_draw(const Value score) {
+    return score < plain_draw_search_score();
+}
+
+Value no_legal_move_search_score(const bool  excludedMove,
+                                 const Value alpha,
+                                 const bool  inCheck,
+                                 const int   ply) {
+    return excludedMove ? alpha : inCheck ? mated_in(ply) : plain_draw_search_score();
+}
+
 // Transitional compatibility helper. Existing code still refers to corrected static eval.
 Value to_corrected_static_eval(const Value v, const int cv) {
 	return normalize_static_eval(v, cv);
@@ -2115,7 +2128,7 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
     // Check if we have an upcoming move that draws by repetition
     // 直近の手が繰り返しによる引き分けになるかを確認します
 
-	if (!rootNode && alpha < VALUE_DRAW && pos.upcoming_repetition(ss->ply))
+	if (!rootNode && search_score_is_below_draw(alpha) && pos.upcoming_repetition(ss->ply))
     {
         alpha = value_draw(nodes);
         if (alpha >= beta)
@@ -4109,7 +4122,7 @@ moves_loop:  // When in check, search starts here
 
 #if STOCKFISH
     if (!moveCount)
-        bestValue = excludedMove ? alpha : ss->inCheck ? mated_in(ss->ply) : VALUE_DRAW;
+        bestValue = no_legal_move_search_score(excludedMove, alpha, ss->inCheck, ss->ply);
 #else
     // ⚠ ⇓ここ⇓、↑Stockfishのコード↑をそのままコピペしてこないように注意！
 
@@ -4314,7 +4327,7 @@ Value Search::YaneuraOuWorker::qsearch(Position& pos, Stack* ss, Value alpha, Va
     //     少なくともこの局面は引き分けであるから、
     //     betaが引き分けのスコアより低いならbeta cutできるというもの。
 
-    if (alpha < VALUE_DRAW && pos.upcoming_repetition(ss->ply))
+    if (search_score_is_below_draw(alpha) && pos.upcoming_repetition(ss->ply))
     {
         alpha = value_draw(nodes);
         if (alpha >= beta)
@@ -4404,7 +4417,7 @@ Value Search::YaneuraOuWorker::qsearch(Position& pos, Stack* ss, Value alpha, Va
 
 #if STOCKFISH
     if (pos.is_draw(ss->ply) || ss->ply >= MAX_PLY)
-        return (ss->ply >= MAX_PLY && !ss->inCheck) ? evaluate(pos) : VALUE_DRAW;
+        return (ss->ply >= MAX_PLY && !ss->inCheck) ? evaluate(pos) : plain_draw_search_score();
 
 #else
 
@@ -4932,7 +4945,7 @@ Value Search::YaneuraOuWorker::qsearch(Position& pos, Stack* ss, Value alpha, Va
         {
             pos.state()->checkersBB = Rank1BB;  // search for legal king-moves only
             if (!MoveList<LEGAL>(pos).size())   // stalemate
-                bestValue = VALUE_DRAW;
+                bestValue = plain_draw_search_score();
             pos.state()->checkersBB = 0;
         }
     }
@@ -5531,7 +5544,7 @@ void syzygy_extend_pv(const OptionsMap&         options,
     // displayed if the engine did not find a drawing move yet, but eventually search
     // will figure it out (e.g. 1kq5/q2r4/5K2/8/8/8/8/7Q w - - 96 1 )
     if (pos.is_draw(0))
-        v = VALUE_DRAW;
+        v = plain_draw_search_score();
 
     // Undo the PV moves
     for (auto it = rootMove.pv.rbegin(); it != rootMove.pv.rend(); ++it)
