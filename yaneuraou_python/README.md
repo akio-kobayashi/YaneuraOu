@@ -37,6 +37,33 @@ for info in moves_info:
     print(f"  SFEN after move: {info['sfen']}")
 ```
 
+## Self-Play Tool
+
+`tools/engine_invoker.py` can run parallel USI matches between two engines. If you use the same engine on both sides, it can be used for self-play data collection.
+
+When `--multipv` and `--save_candidates` are enabled, the tool keeps the existing `.sfen` output and also writes a JSONL sidecar file containing:
+
+- played move sequence
+- per-move normalized evaluation values
+- per-move MultiPV candidate lists with score and PV
+
+Example:
+
+```bash
+python yaneuraou_python/tools/engine_invoker.py \
+  --home /path/to/home \
+  --engine1 YaneuraOu-native \
+  --eval1 eval \
+  --engine2 YaneuraOu-native \
+  --eval2 eval \
+  --parallel_games 2 \
+  --engine_threads 1 \
+  --loop 10 \
+  --time b1000 \
+  --multipv 8 \
+  --save_candidates
+```
+
 ## Original Project Reference
 
 This Python wrapper heavily relies on the high-performance C++ move generation and position representation logic from the **YaneuraOu Shogi Engine**.
