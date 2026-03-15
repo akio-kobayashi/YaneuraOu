@@ -255,6 +255,19 @@ Purpose:
 - make plain draw outcomes explicit in the search-score domain instead of scattering `VALUE_DRAW`
 - make no-legal-move terminal returns use a named helper that distinguishes excluded-move, mate, and draw cases
 
+### Slice 9: shogi terminal mate returns use named helpers
+
+Implemented in:
+- [`yaneuraou-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.cpp)
+
+Added helpers:
+- `checkmated_search_score(...)`
+- `shogi_no_legal_move_search_score(...)`
+
+Purpose:
+- remove remaining direct `mated_in(...)` call sites from shogi-specific terminal branches that conceptually belong to the search-score domain
+- make root no-move, main-search no-legal-move, qsearch in-check no-legal-move, and mate-distance alpha floor updates speak the same named search-score language
+
 ## Non-Goals For The First Pass
 
 Do not start by:

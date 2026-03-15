@@ -752,11 +752,21 @@ bool search_score_is_below_draw(const Value score) {
     return score < plain_draw_search_score();
 }
 
+Value checkmated_search_score(const int ply) { return mated_in(ply); }
+
+Value shogi_no_legal_move_search_score(const Move  excludedMove,
+                                       const Value alpha,
+                                       const int   ply) {
+    return excludedMove ? alpha : checkmated_search_score(ply);
+}
+
 Value no_legal_move_search_score(const bool  excludedMove,
                                  const Value alpha,
                                  const bool  inCheck,
                                  const int   ply) {
-    return excludedMove ? alpha : inCheck ? mated_in(ply) : plain_draw_search_score();
+    return excludedMove ? alpha
+           : inCheck   ? checkmated_search_score(ply)
+                       : plain_draw_search_score();
 }
 
 // Transitional compatibility helper. Existing code still refers to corrected static eval.
@@ -1044,7 +1054,7 @@ void Search::YaneuraOuWorker::start_searching() {
         // rootで指し手がない = (将棋だと)詰みの局面である
 
         probeResult.bestmove  = Move::resign();
-        probeResult.bestscore = mated_in(1);
+        probeResult.bestscore = checkmated_search_score(1);
 
 		// 💡 このあとrootMoves[0]にアクセスして、アクセス違反になるのを防ぐため。
         rootMoves.emplace_back(Move::none());
@@ -2377,7 +2387,7 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
 			   alphaがbeta値を超えているならbeta cutする。
 		*/
 
-        alpha = std::max(mated_in(ss->ply), alpha);
+        alpha = std::max(checkmated_search_score(ss->ply), alpha);
         beta  = std::min(mate_in(ss->ply + 1), beta);
         if (alpha >= beta)
             return alpha;
@@ -3473,12 +3483,12 @@ moves_loop:  // When in check, search starts here
 
                 int margin = std::max(157 * depth + captHist / 29, 0);
 #if STOCKFISH
-				if ((alpha >= VALUE_DRAW || pos.non_pawn_material(us) != PieceValue[movedPiece])
+				if ((alpha >= plain_draw_search_score() || pos.non_pawn_material(us) != PieceValue[movedPiece])
 #else
 				// 🤔 pos.non_pawn_material(us) != PieceValue[movedPiece]に相当する条件は何だろう？
 				//     歩以外の駒割がmovedPieceの駒割というのは、駒が盤上にたくさん残っている感じだろうか。
 
-                if ((alpha >= VALUE_DRAW)
+                if ((alpha >= plain_draw_search_score())
 #endif
                     && !pos.see_ge(move, -margin))
                     continue;
@@ -4129,7 +4139,7 @@ moves_loop:  // When in check, search starts here
 	// 🤔 (将棋では)合法手がない == 詰まされている なので、rootの局面からの手数で詰まされたという評価値を返す。
     //     ただし、singular extension中のときは、ttMoveの指し手が除外されているので単にalphaを返すべき。
     if (!moveCount)
-        bestValue = excludedMove ? alpha : mated_in(ss->ply);
+        bestValue = shogi_no_legal_move_search_score(excludedMove, alpha, ss->ply);
 #endif
 
 	// If there is a move that produces search value greater than alpha,
@@ -4925,7 +4935,7 @@ Value Search::YaneuraOuWorker::qsearch(Position& pos, Stack* ss, Value alpha, Va
         ASSERT_LV5(!MoveList<LEGAL_ALL>(pos).size());
 #endif
 
-		return mated_in(ss->ply);  // Plies to mate from the root
+		return checkmated_search_score(ss->ply);  // Plies to mate from the root
                                    // rootから詰みまでの手数。
     }
 

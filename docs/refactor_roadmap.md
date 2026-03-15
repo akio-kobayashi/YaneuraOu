@@ -159,6 +159,7 @@ Rationale:
 - Migrate TT score decoding and TT cutoff-bound interpretation to named search-score helpers shared by main search and qsearch.
 - Migrate TT writeback, TT bound selection, and repetition/max-move draw outcomes to named search-score helpers.
 - Migrate terminal draw and no-legal-move outcomes to named search-score helpers.
+- Migrate remaining shogi-specific mate-return sites to named search-score helpers and treat the search-score semantics pass as complete once direct search-path references are limited to intentionally low-level primitives.
 
 ### Phase B: Create stable interfaces
 - Introduce evaluator-facing interfaces and compatibility wrappers.
@@ -192,8 +193,7 @@ The following are out of scope for this branch:
 ## Immediate Next Step
 
 The next implementation slice on this branch should be:
-- continue migrating remaining search heuristics that depend on normalized static eval,
-- then introduce an evaluation context abstraction,
+- introduce an evaluation context abstraction now that the search-score semantics pass is nearly complete,
 - then remove direct NNUE accumulator ownership from `Position`,
 - keep existing NNUE behavior through a transitional compatibility layer,
 - and verify each step against [`docs/eval_value_contract.md`](/Users/akio/Documents/GitHub/YaneuraOu/docs/eval_value_contract.md).
