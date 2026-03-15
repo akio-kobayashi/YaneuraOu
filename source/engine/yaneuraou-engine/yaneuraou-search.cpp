@@ -41,9 +41,48 @@ void Search::EvaluationContext::prepare_for_descend(const Position& pos) const {
     Eval::evaluate_with_no_return(pos);
 }
 
-Value Search::EvaluationContext::evaluate(const Position& pos) const {
+Value Search::EvaluationContext::evaluate(const Position& pos, Value optimism) const {
+#if defined(EVAL_SFNN)
+    ASSERT_LV3(networks);
+    ASSERT_LV3(refreshTable);
+    return Eval::evaluate((*networks)[numaAccessToken], pos, accumulatorStack, *refreshTable, optimism);
+#else
+    (void) optimism;
     return Eval::evaluate(pos);
+#endif
 }
+
+void Search::EvaluationContext::reset_for_new_search() {
+#if defined(EVAL_SFNN)
+    accumulatorStack.reset();
+#endif
+}
+
+void Search::EvaluationContext::clear_after_game() {
+#if defined(EVAL_SFNN)
+    ASSERT_LV3(networks);
+    ASSERT_LV3(refreshTable);
+    refreshTable->clear((*networks)[numaAccessToken]);
+#endif
+}
+
+void Search::EvaluationContext::push_dirty_piece(const Eval::DirtyPiece& dirtyPiece) {
+#if defined(EVAL_SFNN)
+    accumulatorStack.push(dirtyPiece);
+#else
+    (void) dirtyPiece;
+#endif
+}
+
+#if defined(EVAL_SFNN)
+void Search::EvaluationContext::bind_networks(
+  const LazyNumaReplicated<Eval::NNUE::Networks>& boundNetworks,
+  NumaReplicatedAccessToken                       token) {
+    networks        = &boundNetworks;
+    numaAccessToken = token;
+    refreshTable    = std::make_unique<Eval::NNUE::AccumulatorCaches>((*networks)[numaAccessToken]);
+}
+#endif
 
 // -------------------
 // 🌈 やねうら王独自追加
@@ -877,6 +916,10 @@ Search::YaneuraOuWorker::YaneuraOuWorker(OptionsMap&               options,
     Search::Worker(options, threads, threadIdx, numaAccessToken, rootPos, rootState, rootMoves), tt(tt),
 		engine(engine), manager(engine.manager) {
 
+#if defined(EVAL_SFNN)
+    evaluationContext.bind_networks(engine.networks, numaAccessToken);
+#endif
+
     //clear();
 
 	// 🤔 ThreadPool::resize_thread()→ThreadPool::set()でThreadPool::clear()が呼び出されて、
@@ -934,7 +977,7 @@ void Search::YaneuraOuWorker::start_searching() {
 #if defined(USE_SFNN)
     // 探索の初回evaluate()では局面の差分更新ができないので
     // accumulatorの初回フラグをセットする。
-    accumulatorStack.reset();
+    evaluationContext.reset_for_new_search();
 #endif
 
     // Non-main threads go directly to iterative_deepening()
@@ -2013,7 +2056,7 @@ void YaneuraOuWorker::do_move(Position&  pos,
 
     DirtyPiece dp = pos.do_move(move, st, givesCheck , &tt);
     nodes.fetch_add(1, std::memory_order_relaxed);
-    accumulatorStack.push(dp);
+    evaluationContext.push_dirty_piece(dp);
 
 #else
 
@@ -2091,7 +2134,7 @@ void YaneuraOuWorker::clear() {
 	// 📝 lowPlyHistoryの初期化は、対局ごとではなく、局面ごと("go"のごと)に変更された。
 
 #if defined(EVAL_SFNN)
-    refreshTable.clear(networks[numaAccessToken]);
+    evaluationContext.clear_after_game();
 #endif
 }
 
@@ -5038,8 +5081,7 @@ Value Search::YaneuraOuWorker::evaluate(const Position& pos) {
 #if defined(EVAL_SFNN)
 	// 最新のStockfishのコード
 
-    return Eval::evaluate(networks[numaAccessToken], pos, accumulatorStack, refreshTable,
-                          optimism[pos.side_to_move()]);
+    return evaluationContext.evaluate(pos, optimism[pos.side_to_move()]);
 
 #else
 	return evaluationContext.evaluate(pos);

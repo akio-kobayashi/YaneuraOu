@@ -400,7 +400,21 @@ namespace Search {
 // a dedicated object that can later own evaluator-local state.
 struct EvaluationContext {
     void  prepare_for_descend(const Position& pos) const;
-    Value evaluate(const Position& pos) const;
+    Value evaluate(const Position& pos, Value optimism = VALUE_ZERO) const;
+    void  reset_for_new_search();
+    void  clear_after_game();
+    void  push_dirty_piece(const Eval::DirtyPiece& dirtyPiece);
+
+#if defined(EVAL_SFNN)
+    void bind_networks(const LazyNumaReplicated<Eval::NNUE::Networks>& networks,
+                       NumaReplicatedAccessToken                       token);
+
+   private:
+    const LazyNumaReplicated<Eval::NNUE::Networks>* networks = nullptr;
+    NumaReplicatedAccessToken                       numaAccessToken;
+    Eval::NNUE::AccumulatorStack                    accumulatorStack;
+    std::unique_ptr<Eval::NNUE::AccumulatorCaches>  refreshTable;
+#endif
 };
 
 // やねうら王の探索Worker
@@ -607,19 +621,6 @@ class YaneuraOuWorker: public Worker {
 #endif
 
 	// NNUEの評価関数の計算用
-
-#if STOCKFISH || defined(EVAL_SFNN)
-	// NNUE評価関数のパラメーターがNumaごとにコピーされるようにする。
-	const LazyNumaReplicated<Eval::NNUE::Networks>& networks;
-
-	// Used by NNUE
-	// NNUEで使う
-
-	// NNUE評価関数のnetworkのL1層を保持しているstack
-    Eval::NNUE::AccumulatorStack  accumulatorStack;
-	// NNUE評価関数の差分計算用
-    Eval::NNUE::AccumulatorCaches refreshTable;
-#endif
 
 #if STOCKFISH
     // 📝 こちらは、StockfishではThreadPool::get_best_thread()の実装のために必要。
