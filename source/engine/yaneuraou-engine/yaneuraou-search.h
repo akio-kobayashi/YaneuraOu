@@ -395,6 +395,14 @@ class YaneuraOuEngine: public Engine {
 
 namespace Search {
 
+// Transitional evaluation seam for YaneuraOu search.
+// This keeps current behavior while moving evaluation entry points behind
+// a dedicated object that can later own evaluator-local state.
+struct EvaluationContext {
+    void  prepare_for_descend(const Position& pos) const;
+    Value evaluate(const Position& pos) const;
+};
+
 // やねうら王の探索Worker
 // 📌 Stockfishから拡張して、やねうら王はエンジンを自由に差し替えられるようになっているので、
 //     自分のWorkerを定義するには、Search::Worker classから派生させる。
@@ -552,6 +560,10 @@ class YaneuraOuWorker: public Worker {
     // aspiration searchで使う。
     Depth rootDepth, completedDepth;
     Value rootDelta;
+
+    // Transitional wrapper around evaluation entry points.
+    // Ownership still lives in the current evaluator / Position machinery.
+    EvaluationContext evaluationContext;
 
 #if STOCKFISH
 	// 📝 やねうら王では、base classが持っている。

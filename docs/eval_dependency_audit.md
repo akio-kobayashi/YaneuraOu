@@ -268,6 +268,21 @@ Purpose:
 - remove remaining direct `mated_in(...)` call sites from shogi-specific terminal branches that conceptually belong to the search-score domain
 - make root no-move, main-search no-legal-move, qsearch in-check no-legal-move, and mate-distance alpha floor updates speak the same named search-score language
 
+### Slice 10: evaluator entry points are routed through a transitional context
+
+Implemented in:
+- [`yaneuraou-search.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.h)
+- [`yaneuraou-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.cpp)
+
+Added helpers:
+- `Search::EvaluationContext`
+- `EvaluationContext::prepare_for_descend(...)`
+- `EvaluationContext::evaluate(...)`
+
+Purpose:
+- stop spreading direct `Eval::evaluate(...)` and `Eval::evaluate_with_no_return(...)` calls through search control flow
+- introduce the first stable evaluator-facing wrapper without changing current `Position` and `StateInfo` ownership
+
 ## Non-Goals For The First Pass
 
 Do not start by:

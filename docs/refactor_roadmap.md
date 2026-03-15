@@ -166,6 +166,10 @@ Rationale:
 - Move evaluation caches out of `Position` ownership.
 - Add comments documenting ownership and invalidation rules.
 
+Current status:
+- Initial transitional wrapper introduced on the search side as `Search::EvaluationContext`.
+- This keeps existing behavior while creating a seam for later evaluator-state ownership changes.
+
 ### Phase C: Restructure search/eval state
 - Define a search thread context object.
 - Consolidate accumulator/cache ownership.
@@ -193,7 +197,7 @@ The following are out of scope for this branch:
 ## Immediate Next Step
 
 The next implementation slice on this branch should be:
-- introduce an evaluation context abstraction now that the search-score semantics pass is nearly complete,
+- extend the evaluation context abstraction so search-side evaluation entry points no longer depend on raw `Eval::...` calls,
 - then remove direct NNUE accumulator ownership from `Position`,
 - keep existing NNUE behavior through a transitional compatibility layer,
 - and verify each step against [`docs/eval_value_contract.md`](/Users/akio/Documents/GitHub/YaneuraOu/docs/eval_value_contract.md).

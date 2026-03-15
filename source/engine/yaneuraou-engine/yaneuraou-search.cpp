@@ -37,6 +37,14 @@ namespace YaneuraOu {
 using namespace Search;
 using namespace Eval;  // Eval::PieceValue
 
+void Search::EvaluationContext::prepare_for_descend(const Position& pos) const {
+    Eval::evaluate_with_no_return(pos);
+}
+
+Value Search::EvaluationContext::evaluate(const Position& pos) const {
+    return Eval::evaluate(pos);
+}
+
 // -------------------
 // 🌈 やねうら王独自追加
 // -------------------
@@ -2246,7 +2254,7 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
         if (!evaluated)
         {
             evaluated = true;
-            Eval::evaluate_with_no_return(pos);
+            evaluationContext.prepare_for_descend(pos);
         }
         this->do_move(pos, move, st, givesCheck, ss);
     };
@@ -2257,7 +2265,7 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
         if (!evaluated)
         {
             evaluated = true;
-            Eval::evaluate_with_no_return(pos);
+            evaluationContext.prepare_for_descend(pos);
         }
         this->do_move(pos, move, st, ss);
     };
@@ -2265,7 +2273,7 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
         if (!evaluated)
         {
             evaluated = true;
-            Eval::evaluate_with_no_return(pos);
+            evaluationContext.prepare_for_descend(pos);
         }
         this->do_null_move(pos, st);
     };
@@ -4397,7 +4405,7 @@ Value Search::YaneuraOuWorker::qsearch(Position& pos, Stack* ss, Value alpha, Va
         if (!evaluated)
         {
             evaluated = true;
-            Eval::evaluate_with_no_return(pos);
+            evaluationContext.prepare_for_descend(pos);
         }
         this->do_move(pos, move, st, givesCheck, ss);
     };
@@ -5034,7 +5042,7 @@ Value Search::YaneuraOuWorker::evaluate(const Position& pos) {
                           optimism[pos.side_to_move()]);
 
 #else
-	return Eval::evaluate(pos);
+	return evaluationContext.evaluate(pos);
 #endif
 }
 
