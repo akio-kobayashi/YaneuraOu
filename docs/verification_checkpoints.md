@@ -40,6 +40,16 @@ Important fixes included in the branch state used for this verification:
 
 Verified on 2026-03-15.
 
+Latest full clean-build checkpoint:
+
+- commit: `b77dce62`
+- verified with:
+  - `make -C source clean`
+  - `make -C source normal APPLE_CPU=native -j4`
+- result:
+  - full rebuild from a clean object state completed successfully
+  - linked output: `source/YaneuraOu-native`
+
 - `source/YaneuraOu-apple_m2` builds successfully with:
   - `make -C source normal APPLE_CPU=native -j4`
 - `source/eval/nn.bin` is loaded successfully by the engine.
