@@ -135,11 +135,11 @@ class FeatureTransformer {
 	// 可能なら差分計算を進める
 	bool UpdateAccumulatorIfPossible(const Position& pos) const {
 		const auto now = pos.state();
-		if (now->accumulator.computed_accumulation) {
+		if (pos.nnue_accumulator().computed_accumulation) {
 			return true;
 		}
-		const auto prev = now->previous;
-		if (prev && prev->accumulator.computed_accumulation) {
+		const auto prevAccumulator = pos.previous_nnue_accumulator();
+		if (prevAccumulator && prevAccumulator->computed_accumulation) {
 			update_accumulator(pos);
 			return true;
 		}
@@ -152,7 +152,7 @@ class FeatureTransformer {
 		if (refresh || !UpdateAccumulatorIfPossible(pos)) {
 			refresh_accumulator(pos);
 		}
-		const auto& accumulation = pos.state()->accumulator.accumulation;
+		const auto& accumulation = pos.nnue_accumulator().accumulation;
 
 #if defined(USE_AVX512)
 		constexpr IndexType kNumChunks = kHalfDimensions / (kSimdWidth * 2);
@@ -282,7 +282,7 @@ class FeatureTransformer {
 	// Calculate cumulative value without using difference calculation
 	// 差分計算を用いずに累積値を計算する
 	void refresh_accumulator(const Position& pos) const {
-		auto& accumulator = pos.state()->accumulator;
+		auto& accumulator = pos.mutable_nnue_accumulator();
 		for (IndexType i = 0; i < kRefreshTriggers.size(); ++i) {
 			Features::IndexList active_indices[2];
 			RawFeatures::AppendActiveIndices(pos, kRefreshTriggers[i], active_indices);
@@ -331,8 +331,10 @@ class FeatureTransformer {
 	// Calculate cumulative value using difference calculation
 	// 差分計算を用いて累積値を計算する
 	void update_accumulator(const Position& pos) const {
-		const auto prev_accumulator = pos.state()->previous->accumulator;
-		auto&      accumulator      = pos.state()->accumulator;
+		const auto* prevAccumulator = pos.previous_nnue_accumulator();
+		ASSERT_LV3(prevAccumulator);
+		const auto& prev_accumulator = *prevAccumulator;
+		auto&       accumulator      = pos.mutable_nnue_accumulator();
 		for (IndexType i = 0; i < kRefreshTriggers.size(); ++i) {
 			Features::IndexList removed_indices[2], added_indices[2];
 			bool                reset[2];

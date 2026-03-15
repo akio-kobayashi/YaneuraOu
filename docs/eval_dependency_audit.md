@@ -283,6 +283,25 @@ Purpose:
 - stop spreading direct `Eval::evaluate(...)` and `Eval::evaluate_with_no_return(...)` calls through search control flow
 - introduce the first stable evaluator-facing wrapper without changing current `Position` and `StateInfo` ownership
 
+### Slice 11: classic NNUE state is accessed through `Position` helpers
+
+Implemented in:
+- [`position.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.h)
+- [`position.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.cpp)
+- [`evaluate_nnue.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/eval/nnue/evaluate_nnue.cpp)
+- [`nnue_feature_transformer.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/eval/nnue/nnue_feature_transformer.h)
+
+Added helpers:
+- `Position::nnue_accumulator()`
+- `Position::mutable_nnue_accumulator()`
+- `Position::previous_nnue_accumulator()`
+- `Position::invalidate_nnue_accumulator()`
+- `Position::invalidate_nnue_score()`
+
+Purpose:
+- reduce direct `state()->accumulator` coupling in classic NNUE code paths
+- make future movement of evaluator-local state out of `StateInfo` possible without forcing search or NNUE code to know the storage layout
+
 ## Non-Goals For The First Pass
 
 Do not start by:

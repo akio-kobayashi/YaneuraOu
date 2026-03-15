@@ -282,7 +282,7 @@ namespace NNUE {
 
     // 評価値を計算する
     static Value ComputeScore(const Position& pos, bool refresh = false) {
-        auto& accumulator = pos.state()->accumulator;
+        auto& accumulator = pos.mutable_nnue_accumulator();
         if (!refresh && accumulator.computed_score) {
             return accumulator.score;
         }
@@ -452,7 +452,7 @@ Value compute_eval(const Position& pos) {
 
 // 評価関数
 Value evaluate(const Position& pos) {
-    const auto& accumulator = pos.state()->accumulator;
+    const auto& accumulator = pos.nnue_accumulator();
     if (accumulator.computed_score) {
         return accumulator.score;
     }

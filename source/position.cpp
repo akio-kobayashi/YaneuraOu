@@ -1660,8 +1660,7 @@ void Position::do_move_impl(Move m, StateInfo& newSt, bool givesCheck, const T* 
     st->sum.p[0][0] = VALUE_NOT_EVALUATED;
 #endif
 #if defined(EVAL_NNUE)
-    st->accumulator.computed_accumulation = false;
-    st->accumulator.computed_score        = false;
+    invalidate_nnue_accumulator();
 #endif
 
 #if defined(USE_BOARD_EFFECT_PREV)
@@ -2390,7 +2389,7 @@ void Position::do_null_move(StateInfo& newSt, const T& tt) {
 
 #if defined(USE_CLASSIC_EVAL) && defined(EVAL_NNUE)
     // NNUEの場合、KPPT型と違って、手番が違う場合、計算なしに済ますわけにはいかない。
-    st->accumulator.computed_score = false;
+    invalidate_nnue_score();
 #endif
 
 	// このタイミングでアドレスが確定するのでprefetchしたほうが良い。(かも)

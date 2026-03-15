@@ -786,6 +786,20 @@ public:
     // たとえば、state()->capturedPieceであれば、前局面で捕獲された駒が格納されている。
     StateInfo* state() const { return st; }
 
+#if defined(EVAL_NNUE)
+    Eval::NNUE::Accumulator& nnue_accumulator() { return st->accumulator; }
+    const Eval::NNUE::Accumulator& nnue_accumulator() const { return st->accumulator; }
+    Eval::NNUE::Accumulator& mutable_nnue_accumulator() const { return st->accumulator; }
+    const Eval::NNUE::Accumulator* previous_nnue_accumulator() const {
+        return st->previous ? &st->previous->accumulator : nullptr;
+    }
+    void invalidate_nnue_accumulator() {
+        st->accumulator.computed_accumulation = false;
+        st->accumulator.computed_score        = false;
+    }
+    void invalidate_nnue_score() { st->accumulator.computed_score = false; }
+#endif
+
 	// put_piece()やremove_piece()を用いたときは、最後にupdate_bitboards()を呼び出して
     // bitboardの整合性を保つこと。
     // また、put_piece_simple()は、put_piece()の王の升(kingSquare)を更新しない版。do_move()で用いる。

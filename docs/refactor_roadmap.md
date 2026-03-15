@@ -169,6 +169,7 @@ Rationale:
 Current status:
 - Initial transitional wrapper introduced on the search side as `Search::EvaluationContext`.
 - This keeps existing behavior while creating a seam for later evaluator-state ownership changes.
+- Classic NNUE accumulator access is now routed through `Position` helper methods instead of open-coded `state()->accumulator` references.
 
 ### Phase C: Restructure search/eval state
 - Define a search thread context object.
@@ -198,6 +199,7 @@ The following are out of scope for this branch:
 
 The next implementation slice on this branch should be:
 - extend the evaluation context abstraction so search-side evaluation entry points no longer depend on raw `Eval::...` calls,
+- then replace the remaining open-coded evaluator-state fields in `StateInfo` with grouped or redirected accessors,
 - then remove direct NNUE accumulator ownership from `Position`,
 - keep existing NNUE behavior through a transitional compatibility layer,
 - and verify each step against [`docs/eval_value_contract.md`](/Users/akio/Documents/GitHub/YaneuraOu/docs/eval_value_contract.md).
