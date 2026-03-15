@@ -1,0 +1,145 @@
+# Evaluation Dependency Audit
+
+This document records where search currently depends on evaluation-value meaning and scale.
+
+Primary references:
+- [`docs/eval_value_contract.md`](/Users/akio/Documents/GitHub/YaneuraOu/docs/eval_value_contract.md)
+- [`docs/refactor_roadmap.md`](/Users/akio/Documents/GitHub/YaneuraOu/docs/refactor_roadmap.md)
+
+## Scope
+
+Audited files:
+- [`source/engine/yaneuraou-engine/yaneuraou-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.cpp)
+- [`source/engine/yaneuraou-engine/yaneuraou-search.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.h)
+- [`source/search.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/search.h)
+- [`source/eval/nnue/evaluate_nnue.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/eval/nnue/evaluate_nnue.cpp)
+
+## Main Findings
+
+### A. Search directly consumes evaluator-domain values as pruning inputs
+
+Examples:
+- razoring threshold uses `eval < alpha - 514 - 294 * depth * depth`
+  - [`yaneuraou-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.cpp)
+- child futility uses a depth-dependent margin applied directly to `eval`
+  - [`yaneuraou-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.cpp)
+- null move condition uses `ss->staticEval >= beta - 18 * depth + 390`
+  - [`yaneuraou-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.cpp)
+- probcut uses `probCutBeta = beta + 224 - 64 * improving`
+  and `probCutDepth = depth - 5 - (ss->staticEval - beta) / 306`
+  - [`yaneuraou-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.cpp)
+- capture and quiet futility pruning use direct arithmetic on `ss->staticEval`
+  - [`yaneuraou-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.cpp)
+
+Assessment:
+- High priority
+- These are the main places where evaluator scale leaks into search behavior.
+
+### B. `staticEval` mixes at least three meanings
+
+Observed meanings:
+- raw evaluator output via `evaluate(pos)`
+- corrected static evaluation via `to_corrected_static_eval(...)`
+- transposition-table value reused as a better estimate than local eval
+
+Examples:
+- `unadjustedStaticEval = evaluate(pos);`
+- `ss->staticEval = eval = to_corrected_static_eval(unadjustedStaticEval, correctionValue);`
+- `if (is_valid(ttData.value) ... ) eval = ttData.value;`
+  - [`yaneuraou-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.cpp)
+
+Assessment:
+- Highest priority
+- This is the core semantic ambiguity that the refactor must resolve.
+
+### C. TT values and evaluator values are partially blended
+
+Examples:
+- TT eval reused when `ttData.eval` is valid
+- TT search score can replace local static eval estimate under bound checks
+- `value_to_tt()` / `value_from_tt()` coexist with direct `ttData.value` comparisons
+  - [`yaneuraou-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.cpp)
+
+Assessment:
+- High priority
+- TT values belong to the search-score domain, while static eval should remain distinct.
+
+### D. History and ordering updates depend on static eval differences
+
+Examples:
+- bonus based on `(ss - 1)->staticEval + ss->staticEval`
+- `improving` and `opponentWorsening` computed from static eval comparisons
+- depth adjustments depend on sums/comparisons of static eval values
+  - [`yaneuraou-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.cpp)
+
+Assessment:
+- High priority
+- These uses may remain valid, but they must consume a clearly defined normalized static-eval domain.
+
+### E. QSearch has the same semantic mixing problem
+
+Examples:
+- qsearch computes `unadjustedStaticEval`
+- immediately converts it with `to_corrected_static_eval(...)`
+- then uses the result for stand-pat, futility base, and alpha updates
+  - [`yaneuraou-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.cpp)
+
+Assessment:
+- High priority
+- Any static-eval contract must apply to both main search and qsearch.
+
+### F. Evaluator entry points are too weakly named
+
+Examples:
+- `Eval::evaluate(pos)`
+- `Eval::compute_eval(pos)`
+- `Eval::evaluate_with_no_return(pos)`
+  - [`evaluate_nnue.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/eval/nnue/evaluate_nnue.cpp)
+
+Assessment:
+- Medium priority
+- Current naming does not expose score semantics clearly enough.
+
+## Immediate Refactor Implications
+
+The first code changes should not try to remove all numeric tuning.
+They should instead introduce explicit boundaries.
+
+### Required boundary split
+
+At minimum, search should distinguish:
+- raw evaluator output
+- normalized static eval
+- search score
+
+### First concrete code target
+
+Introduce named conversion helpers and migrate call sites to them.
+
+Suggested initial API shape:
+- `raw_eval_from_evaluator(...)`
+- `normalize_static_eval(raw_eval, correction, context)`
+- `search_score_from_tt(...)`
+
+The names do not need to be final, but the semantic separation does.
+
+## Recommended First Migration Candidates
+
+Start with the smallest central seam:
+
+1. [`to_corrected_static_eval(...)`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.cpp)
+2. `ttData.eval` / `ttData.value` decision points
+3. `improving` / `opponentWorsening`
+4. null move and razoring entry conditions
+
+These changes expose the semantic contract without immediately rewriting every pruning constant.
+
+## Non-Goals For The First Pass
+
+Do not start by:
+- retuning all pruning constants
+- changing evaluator strength
+- changing `.nnue` format
+- replacing every `Value` in the codebase
+
+The first pass should isolate meaning, not redesign all tuning.

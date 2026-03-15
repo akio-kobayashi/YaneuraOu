@@ -19,6 +19,8 @@ YaneuraOu_backup*.lnk
 ~*
 .*/
 !.github/
+.DS_Store
+**/.DS_Store
 *.nnue
 *.nnue.*
 *.result.txt

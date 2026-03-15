@@ -60,7 +60,8 @@ YANEURAOU_EDITION = YANEURAOU_ENGINE_NNUE
 
 # macOSの場合、
 # 1. IntelMacでSSE4.2までしか対応していないなら、APPLESSE42 を指定。AVX2に対応しているなら APPLEAVX2を指定する。
-# 2. M1以降のCPUであれば、APPLEM1を指定する。(M2でもM3でもAPPLEM1を指定する。)
+# 2. Apple Silicon (M1以降) であれば、APPLEM1を指定する。
+#    世代ごとの最適化は APPLE_CPU で指定する。例: APPLE_CPU=apple-m3
 
 # --- Intel/AMD系 (x86/x64 Platform)
 #TARGET_CPU = AVX512VNNI
@@ -83,8 +84,18 @@ YANEURAOU_EDITION = YANEURAOU_ENGINE_NNUE
 # -- macOS for Intel
 #TARGET_CPU = APPLEAVX2
 #TARGET_CPU = APPLESSE42
-# -- macOS for M1/M2/M3
+# -- macOS for Apple Silicon
 TARGET_CPU = APPLEM1
+
+# Apple Silicon向けの個別CPU最適化
+# 例:
+#   APPLE_CPU = native
+#   APPLE_CPU = apple-m1
+#   APPLE_CPU = apple-m2
+#   APPLE_CPU = apple-m3
+#   APPLE_CPU = apple-m4
+# 未指定なら、Apple Silicon向け分岐で -mcpu は付与しない。
+APPLE_CPU =
 
 
 # デバッガーを使用するか (debugger)
@@ -115,7 +126,7 @@ PYTHON = python
 
 # 標準的なコンパイルオプション (standard compile options)
 #CPPFLAGS      = -std=c++17 -fno-exceptions -fno-rtti -Wextra -MMD -MP -fpermissive
-CPPFLAGS      = -std=c++17 -fno-exceptions -fno-rtti -Wextra -MMD -MP -fpermissive -Ofast -mcpu=apple-m2 -ftree-vectorize -DNDEBUG -march=native -ffp-contract=fast -pthread
+CPPFLAGS      = -std=c++17 -fno-exceptions -fno-rtti -Wextra -MMD -MP -fpermissive -Ofast -ftree-vectorize -DNDEBUG -ffp-contract=fast -pthread
 #NVCC_CPPFLAGS = -std=c++17 -x cu -maxrregcount=0 --machine 64 --compile -cudart static -DNDEBUG -Xcompiler "-Ofast"
 NVCC_CPPFLAGS =
 WCPPFLAGS     =
@@ -242,7 +253,15 @@ else
 		TARGET = $(TARGETDIR)/YaneuraOu-by-gcc.exe
 	else
 		CPPFLAGS += -D_LINUX
-		TARGET = $(TARGETDIR)/YaneuraOu-apple_m2
+		ifeq ($(TARGET_CPU),APPLEM1)
+			ifneq ($(strip $(APPLE_CPU)),)
+				TARGET = $(TARGETDIR)/YaneuraOu-$(APPLE_CPU)
+			else
+				TARGET = $(TARGETDIR)/YaneuraOu-apple_silicon
+			endif
+		else
+			TARGET = $(TARGETDIR)/YaneuraOu-by-gcc
+		endif
 	endif
 endif
 
@@ -625,6 +644,9 @@ else ifeq ($(TARGET_CPU),APPLESSE42)
 	CPPFLAGS += -DIS_64BIT -DUSE_SSE42 -target x86_64-apple-macos11
 else ifeq ($(TARGET_CPU),APPLEM1)
 	CPPFLAGS += -DIS_64BIT -DUSE_NEON -target arm64-apple-macos11
+	ifneq ($(strip $(APPLE_CPU)),)
+		CPPFLAGS += -mcpu=$(APPLE_CPU)
+	endif
 else ifeq ($(TARGET_CPU),WASM)
 
 else ifeq ($(TARGET_CPU),OTHER)

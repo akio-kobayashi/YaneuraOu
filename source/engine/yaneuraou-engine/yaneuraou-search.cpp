@@ -523,12 +523,34 @@ int correction_value(const YaneuraOuWorker& w, const Position& pos, const Stack*
     return 9536 * pcv + 8494 * micv + 10132 * (wnpcv + bnpcv) + 7156 * cntcv;
 }
 
-// Add correctionHistory value to raw staticEval and guarantee evaluation
-// does not hit the tablebase range.
-// correctionHistory の値を raw staticEval に加え、
-// 評価値がテーブルベースの範囲に入らないことを保証する。
+// Contract seam:
+//   raw evaluator output -> normalized static eval used by search heuristics.
+// This is the primary conversion point governed by docs/eval_value_contract.md.
+Value normalize_static_eval(const Value rawEval, const int correctionValue) {
+    // Add correctionHistory value to raw staticEval and guarantee evaluation
+    // does not hit the tablebase range.
+    // correctionHistory の値を raw staticEval に加え、
+    // 評価値がテーブルベースの範囲に入らないことを保証する。
+    return std::clamp(rawEval + correctionValue / 131072, VALUE_TB_LOSS_IN_MAX_PLY + 1,
+                      VALUE_TB_WIN_IN_MAX_PLY - 1);
+}
+
+// Search may use a TT score as a better estimate than local normalized static eval
+// when TT bounds justify it. This still belongs to a different semantic layer than
+// raw evaluator output.
+Value merge_tt_into_static_eval_estimate(const Value normalizedStaticEval,
+                                         const Value ttSearchScore,
+                                         const Bound ttBound) {
+    if (is_valid(ttSearchScore)
+        && (ttBound & (ttSearchScore > normalizedStaticEval ? BOUND_LOWER : BOUND_UPPER)))
+        return ttSearchScore;
+
+    return normalizedStaticEval;
+}
+
+// Transitional compatibility helper. Existing code still refers to corrected static eval.
 Value to_corrected_static_eval(const Value v, const int cv) {
-	return std::clamp(v + cv / 131072, VALUE_TB_LOSS_IN_MAX_PLY + 1, VALUE_TB_WIN_IN_MAX_PLY - 1);
+	return normalize_static_eval(v, cv);
 }
 
 void update_correction_history(const Position&          pos,
@@ -2693,7 +2715,7 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
 #endif
 #endif
 
-        ss->staticEval = eval = to_corrected_static_eval(unadjustedStaticEval, correctionValue);
+        ss->staticEval = eval = normalize_static_eval(unadjustedStaticEval, correctionValue);
 
         // ttValue can be used as a better position evaluation
         // ttValue は、より良い局面評価として使用できる
@@ -2708,15 +2730,13 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
 				  evalとしてttValueを採用したほうがこの局面に対する評価値の見積りとして適切である。
 		*/
 
-        if (is_valid(ttData.value)
-            && (ttData.bound & (ttData.value > eval ? BOUND_LOWER : BOUND_UPPER)))
-            eval = ttData.value;
+        eval = merge_tt_into_static_eval_estimate(eval, ttData.value, ttData.bound);
     }
     else
     {
         unadjustedStaticEval = evaluate(pos);
 
-        ss->staticEval = eval = to_corrected_static_eval(unadjustedStaticEval, correctionValue);
+        ss->staticEval = eval = normalize_static_eval(unadjustedStaticEval, correctionValue);
 
         // Static evaluation is saved as it was before adjustment by correction history
         // 静的評価は、補正履歴による調整が行われる前の状態で保存される。
@@ -4337,7 +4357,7 @@ Value Search::YaneuraOuWorker::qsearch(Position& pos, Stack* ss, Value alpha, Va
 #endif
 
 			ss->staticEval = bestValue =
-				to_corrected_static_eval(unadjustedStaticEval, correctionValue);
+				normalize_static_eval(unadjustedStaticEval, correctionValue);
 
 			// ttValue can be used as a better position evaluation
             // ttValueは、より良い局面評価として使用できる
@@ -4350,9 +4370,8 @@ Value Search::YaneuraOuWorker::qsearch(Position& pos, Stack* ss, Value alpha, Va
 				    そのための条件。
 			*/
 
-            if (is_valid(ttData.value) && !is_decisive(ttData.value)
-                && (ttData.bound & (ttData.value > bestValue ? BOUND_LOWER : BOUND_UPPER)))
-                bestValue = ttData.value;
+            if (!is_decisive(ttData.value))
+                bestValue = merge_tt_into_static_eval_estimate(bestValue, ttData.value, ttData.bound);
         }
         else
         {
@@ -4398,7 +4417,7 @@ Value Search::YaneuraOuWorker::qsearch(Position& pos, Stack* ss, Value alpha, Va
             unadjustedStaticEval = evaluate(pos);
 
             ss->staticEval = bestValue =
-				to_corrected_static_eval(unadjustedStaticEval, correctionValue);
+				normalize_static_eval(unadjustedStaticEval, correctionValue);
 
 #if 0       // 以前のコード
             unadjustedStaticEval =
