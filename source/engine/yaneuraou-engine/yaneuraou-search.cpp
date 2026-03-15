@@ -688,6 +688,9 @@ Value qsearch_capture_futility_value_from_normalized_static_eval(
     return futilityBase + capturedPieceValue;
 }
 
+Value value_to_tt(Value v, int ply);
+Value value_from_tt(Value v, int ply /*, int r50c */);
+
 Value search_score_from_tt_entry(const bool ttHit, const Value ttStoredValue, const int ply
 #if STOCKFISH
                                  ,
