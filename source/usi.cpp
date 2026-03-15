@@ -109,22 +109,24 @@ void USIEngine::set_engine(IEngine& _engine) {
     //     よって、派生classのadd_options()をここで明示的に呼び出してoptionを生やす必要がある。
     engine.add_options();
 
-#if defined(EVAL_LEARN)
-	// グローバルなOptionsにコピーしておく。
-	Options.clear();
-	for (size_t i = 0; i < engine.get_options().size() ; ++i)
-	{
-		auto p = engine.get_options().get_option_by_idx(i);
-		Options.add(p.first, p.second);
-	}
-#endif
-
     // 📝 旧評価関数は、起動時にEval::add_options()が呼び出されることを
     //     期待するコードになっているので呼び出して初期化してやる。
     //     また、その時にエンジンオプションを追加する。
 
 #if defined(USE_CLASSIC_EVAL)
     Eval::add_options(engine.get_options(), engine.get_threads());
+#endif
+
+#if defined(EVAL_LEARN)
+	// グローバルなOptionsにコピーしておく。
+	// ⚠ Eval::add_options() が engine.get_options() に option を追加するので、
+	//    このコピーはその後でないと idx が非連続になり、後段の get_option_by_idx() 前提が崩れる。
+	Options.clear();
+	for (size_t i = 0; i < engine.get_options().size() ; ++i)
+	{
+		auto p = engine.get_options().get_option_by_idx(i);
+		Options.add(p.first, p.second);
+	}
 #endif
 
 	// optionの値が変更された時に、その結果文字列を出力するためのhandlerを設定してやる。
