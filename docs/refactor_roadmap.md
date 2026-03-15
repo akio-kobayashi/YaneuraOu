@@ -36,7 +36,7 @@ Recommended first slice:
 - Introduce named conversion helpers or wrapper types for static-eval versus search-score usage.
 - Use [`docs/eval_value_contract.md`](/Users/akio/Documents/GitHub/YaneuraOu/docs/eval_value_contract.md) as the governing specification for this work.
 
-### 2. Decouple `Position` from evaluation-specific state
+### 2. Introduce access boundaries around evaluation-specific state
 
 Current symptoms:
 - [`source/position.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.h) contains `#if defined(EVAL_NNUE)` blocks.
@@ -47,17 +47,38 @@ Why this matters:
 - Board representation and evaluation are separate concerns.
 - Adding new evaluators should not require invasive edits to `Position`.
 - Current coupling increases rebuild cost and makes evaluator experiments fragile.
+- The current codebase still expects classic NNUE to mutate cache-like state through `const Position&`, so direct ownership removal is riskier than first introducing stable access seams.
 
 Refactor direction:
 - Introduce an evaluation context object owned by search/evaluation layers rather than `Position`.
 - Define a narrow evaluator-facing interface that reads immutable board state from `Position`.
-- Move NNUE-specific caches/accumulators out of `Position` and into evaluator state or thread-local search state.
+- Replace open-coded `state()->...` evaluator accesses with `Position` helpers or evaluator-context methods before changing ownership.
 
 Recommended first slice:
-- Replace direct `Position::accumulator` ownership with an adapter type referenced from search code.
-- Keep behavior unchanged by using a compatibility wrapper during transition.
+- Route search-side evaluation entry points through a compatibility object.
+- Route classic NNUE accumulator access through `Position` helpers.
+- Keep behavior unchanged by using compatibility wrappers during transition.
 
-### 3. Reduce dependence on `config.h` feature macros
+### 3. Move evaluator-specific ownership out of `Position` and `StateInfo`
+
+Current symptoms:
+- Even after accessors are introduced, `StateInfo` still physically stores evaluator-specific fields such as `Accumulator`, `DirtyPiece`, and classic-eval caches.
+- `position.cpp`, classic NNUE, and search still rely on those fields existing in the current storage layout.
+
+Why this matters:
+- Access seams alone improve readability, but they do not yet reduce ownership coupling.
+- Actual evaluator replacement or alternative cache layouts still require `StateInfo` edits until the storage is relocated.
+
+Refactor direction:
+- Use the newly introduced access seams to move evaluator-local mutable state into evaluator-owned or worker-owned storage.
+- Keep a compatibility layer until all call sites stop depending on `StateInfo` layout.
+- Move one evaluator-specific field group at a time instead of attempting a one-shot rewrite.
+
+Recommended first slice:
+- Group classic NNUE-specific state behind accessor-backed storage.
+- Then relocate one field family at a time, starting with accumulator-like caches rather than broad `StateInfo` surgery.
+
+### 4. Reduce dependence on `config.h` feature macros
 
 Current symptoms:
 - Large parts of the engine are configured by preprocessor switches in [`source/config.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/config.h).
@@ -81,7 +102,7 @@ Recommended first slice:
 - Introduce a small `BuildConfig` / `EngineConfig` layer that centralizes capability queries.
 - Start by replacing read-only macro checks in non-hot code paths.
 
-### 4. Improve NUMA and thread-local evaluation ownership
+### 5. Improve NUMA and thread-local evaluation ownership
 
 Current symptoms:
 - [`source/engine.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine.h), [`source/search.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/search.h), and [`source/numa.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/numa.h) already use `LazyNumaReplicated`, but the ownership model is inconsistent.
@@ -105,7 +126,7 @@ Recommended first slice:
 - Document and simplify ownership of `networks`, accumulator stacks, and refresh tables.
 - Introduce a single thread-context object consumed by search.
 
-### 5. Modernize the build system incrementally
+### 6. Modernize the build system incrementally
 
 Current symptoms:
 - The project maintains a complex [`source/Makefile`](/Users/akio/Documents/GitHub/YaneuraOu/source/Makefile) plus Visual Studio project files.
@@ -134,11 +155,12 @@ Recommended order:
 
 1. evaluator score-semantics cleanup
 2. search-entry predicate cleanup on normalized static eval
-3. `Position` / evaluator decoupling
-4. Thread-context and NUMA ownership cleanup
-5. Macro reduction through config abstraction
-6. Build-system modernization
-7. SIMD/vendor-specific cleanup after ownership and build boundaries are clearer
+3. evaluator access-boundary cleanup
+4. evaluator ownership move out of `Position` / `StateInfo`
+5. Thread-context and NUMA ownership cleanup
+6. Macro reduction through config abstraction
+7. Build-system modernization
+8. SIMD/vendor-specific cleanup after ownership and build boundaries are clearer
 
 Rationale:
 - Numeric score coupling must be reduced before evaluator boundaries are truly clean.
@@ -163,7 +185,7 @@ Rationale:
 
 ### Phase B: Create stable interfaces
 - Introduce evaluator-facing interfaces and compatibility wrappers.
-- Move evaluation caches out of `Position` ownership.
+- Route evaluator access through those wrappers before changing ownership.
 - Add comments documenting ownership and invalidation rules.
 
 Current status:
@@ -171,17 +193,22 @@ Current status:
 - This keeps existing behavior while creating a seam for later evaluator-state ownership changes.
 - Classic NNUE accumulator access is now routed through `Position` helper methods instead of open-coded `state()->accumulator` references.
 
-### Phase C: Restructure search/eval state
+### Phase C: Move evaluator ownership
+- Relocate evaluator-local mutable state out of `StateInfo` in small slices.
+- Keep accessor compatibility during the transition.
+- Verify each storage move with a full clean rebuild before proceeding.
+
+### Phase D: Restructure search/eval state
 - Define a search thread context object.
 - Consolidate accumulator/cache ownership.
 - Clarify NUMA-local versus thread-local data.
 
-### Phase D: Replace macro usage in non-hot layers
+### Phase E: Replace macro usage in non-hot layers
 - Convert simple feature checks into typed config helpers.
 - Shrink direct `config.h` includes in leaf modules.
 - Preserve compile-time optimization in hot loops where justified.
 
-### Phase E: Build cleanup
+### Phase F: Build cleanup
 - Remove Visual Studio from the supported build matrix.
 - Provide one maintained non-Visual-Studio build path.
 - Encode CPU targeting and evaluator selection cleanly.
@@ -198,8 +225,8 @@ The following are out of scope for this branch:
 ## Immediate Next Step
 
 The next implementation slice on this branch should be:
-- extend the evaluation context abstraction so search-side evaluation entry points no longer depend on raw `Eval::...` calls,
-- then replace the remaining open-coded evaluator-state fields in `StateInfo` with grouped or redirected accessors,
-- then remove direct NNUE accumulator ownership from `Position`,
+- continue replacing remaining open-coded evaluator-state fields in `StateInfo` with grouped or redirected accessors,
+- then choose one evaluator-owned state family and move its storage behind the existing access seams,
+- then proceed to broader thread-context and NUMA ownership cleanup,
 - keep existing NNUE behavior through a transitional compatibility layer,
 - and verify each step against [`docs/eval_value_contract.md`](/Users/akio/Documents/GitHub/YaneuraOu/docs/eval_value_contract.md).
