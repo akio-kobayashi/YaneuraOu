@@ -153,6 +153,7 @@ Rationale:
 - Introduce explicit helpers or types for conversion boundaries.
 - Identify heuristic thresholds that currently assume a specific evaluator scale.
 - Migrate `improving`, `opponentWorsening`, razoring, null-move entry, and probcut entry to named helpers that explicitly consume normalized static eval.
+- Migrate futility margins, move-count skip thresholds, and qsearch futility base to named helpers that explicitly consume normalized static eval.
 
 ### Phase B: Create stable interfaces
 - Introduce evaluator-facing interfaces and compatibility wrappers.

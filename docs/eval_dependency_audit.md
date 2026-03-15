@@ -164,6 +164,23 @@ Purpose:
 - make it explicit that these search heuristics depend on normalized static eval semantics
 - keep pruning formulas stable while moving evaluator-scale assumptions behind named predicates
 
+### Slice 3: futility and shallow-depth pruning consume normalized static eval
+
+Implemented in:
+- [`yaneuraou-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.cpp)
+
+Added helpers:
+- `futility_margin_from_normalized_static_eval(...)`
+- `should_futility_prune_child_from_normalized_static_eval(...)`
+- `quiet_move_skip_threshold_from_normalized_static_eval(...)`
+- `capture_futility_value_from_normalized_static_eval(...)`
+- `quiet_futility_value_from_normalized_static_eval(...)`
+- `qsearch_futility_base_from_normalized_static_eval(...)`
+
+Purpose:
+- isolate evaluator-scale assumptions inside named futility helpers
+- keep capture/quiet futility and qsearch futility base tied to normalized static eval semantics
+
 ## Non-Goals For The First Pass
 
 Do not start by:

@@ -581,6 +581,57 @@ Value probcut_beta_from_improving_flag(const Value beta, const bool improving) {
     return beta + 224 - 64 * improving;
 }
 
+Value futility_margin_from_normalized_static_eval(const Depth depth,
+                                                  const bool  ttHit,
+                                                  const bool  improving,
+                                                  const bool  opponentWorsening,
+                                                  const int   priorStatScore,
+                                                  const int   correctionValue) {
+    Value futilityMult = 91 - 21 * !ttHit;
+
+    return futilityMult * depth                          //
+         - 2094 * improving * futilityMult / 1024        //
+         - 1324 * opponentWorsening * futilityMult / 4096//
+         + priorStatScore / 331                          //
+         + std::abs(correctionValue) / 158105;
+}
+
+bool should_futility_prune_child_from_normalized_static_eval(const bool  isTtPv,
+                                                             const Depth depth,
+                                                             const Value staticEvalEstimate,
+                                                             const Value beta,
+                                                             const bool  hasTtMove,
+                                                             const bool  ttCapture,
+                                                             const Value futilityMargin) {
+    return !isTtPv && depth < 14 && staticEvalEstimate - futilityMargin >= beta
+           && staticEvalEstimate >= beta && (!hasTtMove || ttCapture) && !is_loss(beta)
+           && !is_win(staticEvalEstimate);
+}
+
+int quiet_move_skip_threshold_from_normalized_static_eval(const Depth depth,
+                                                          const bool  improving) {
+    return (3 + depth * depth) / (2 - improving);
+}
+
+Value capture_futility_value_from_normalized_static_eval(const Value staticEval,
+                                                         const Depth lmrDepth,
+                                                         const Value capturedPieceValue,
+                                                         const int   captureHistoryScore) {
+    return staticEval + 231 + 211 * lmrDepth + capturedPieceValue
+           + 130 * captureHistoryScore / 1024;
+}
+
+Value quiet_futility_value_from_normalized_static_eval(const Value staticEval,
+                                                       const bool  hasBestMove,
+                                                       const Depth lmrDepth,
+                                                       const Value alpha) {
+    return staticEval + 47 + 171 * !hasBestMove + 134 * lmrDepth + 90 * (staticEval > alpha);
+}
+
+Value qsearch_futility_base_from_normalized_static_eval(const Value staticEval) {
+    return staticEval + 352;
+}
+
 // Transitional compatibility helper. Existing code still refers to corrected static eval.
 Value to_corrected_static_eval(const Value v, const int cv) {
 	return normalize_static_eval(v, cv);
@@ -2891,18 +2942,11 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
         // futility margin
         // 💡 depth(残り探索深さ)に応じたfutility margin。
 
-		auto futility_margin = [&](Depth d) {
-            Value futilityMult = 91 - 21 * !ss->ttHit;
+        const Value futilityMargin = futility_margin_from_normalized_static_eval(
+          depth, ss->ttHit, improving, opponentWorsening, (ss - 1)->statScore, correctionValue);
 
-            return futilityMult * d                                //
-                 - 2094 * improving * futilityMult / 1024          //
-                 - 1324 * opponentWorsening * futilityMult / 4096  //
-                 + (ss - 1)->statScore / 331                       //
-                 + std::abs(correctionValue) / 158105;
-        };
-
-        if (!ss->ttPv && depth < 14 && eval - futility_margin(depth) >= beta && eval >= beta
-            && (!ttData.move || ttCapture) && !is_loss(beta) && !is_win(eval))
+        if (should_futility_prune_child_from_normalized_static_eval(
+              ss->ttPv, depth, eval, beta, bool(ttData.move), ttCapture, futilityMargin))
             return (2 * beta + eval) / 3;
     }
 
@@ -3266,7 +3310,7 @@ moves_loop:  // When in check, search starts here
             // Skip quiet moves if movecount exceeds our FutilityMoveCount threshold
             // movecountがFutilityMoveCountの閾値を超えた場合、quietの手をスキップします
 
-            if (moveCount >= (3 + depth * depth) / (2 - improving))
+            if (moveCount >= quiet_move_skip_threshold_from_normalized_static_eval(depth, improving))
                 mp.skip_quiet_moves();
 
             // Reduced depth of the next LMR search
@@ -3291,8 +3335,8 @@ moves_loop:  // When in check, search starts here
                     //       = CapturePieceValuePlusPromote()
                     //     のほうがより正確な評価ではないか？
 
-					Value futilityValue = ss->staticEval + 231 + 211 * lmrDepth
-										+ PieceValue[capturedPiece] + 130 * captHist / 1024;
+                    Value futilityValue = capture_futility_value_from_normalized_static_eval(
+                      ss->staticEval, lmrDepth, PieceValue[capturedPiece], captHist);
 
 
                     if (futilityValue <= alpha)
@@ -3334,8 +3378,8 @@ moves_loop:  // When in check, search starts here
                 // (*Scaler): Generally, a lower divisor scales well
                 lmrDepth += history / 3220;
 
-				Value futilityValue = ss->staticEval + 47 + 171 * !bestMove + 134 * lmrDepth
-                    + 90 * (ss->staticEval > alpha);
+                Value futilityValue = quiet_futility_value_from_normalized_static_eval(
+                  ss->staticEval, bool(bestMove), lmrDepth, alpha);
 
                 // Futility pruning: parent node
                 // (*Scaler): Generally, more frequent futility pruning
@@ -4498,7 +4542,7 @@ Value Search::YaneuraOuWorker::qsearch(Position& pos, Stack* ss, Value alpha, Va
 		// 💡 futilityの基準となる値をbestValueにmargin値を加算したものとして、
         //     これを下回るようであれば枝刈りする。
 
-		futilityBase = ss->staticEval + 352;
+		futilityBase = qsearch_futility_base_from_normalized_static_eval(ss->staticEval);
 
     }
 
