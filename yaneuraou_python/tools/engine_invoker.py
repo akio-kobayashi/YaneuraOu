@@ -166,19 +166,12 @@ def create_option(engines,engine_threads,evals,times,hashes,multipv,PARAMETERS_L
 
 			option.append("setoption name Threads value " + str(engine_threads))
 			option.append("setoption name EvalDir value " + evals[i])
-			option.append("setoption name Hash value " + str(hashes[i]))
+			option.append("setoption name USI_Hash value " + str(hashes[i]))
 			option.append("setoption name BookFile value no_book")
 			option.append("setoption name MultiPV value " + str(multipv))
-			option.append("setoption MinimumThinkingTime value 1000")
+			option.append("setoption name MinimumThinkingTime value 1000")
 			option.append("setoption name NetworkDelay value 0")
 			option.append("setoption name NetworkDelay2 value 0")
-
-#			option.append("setoption name EvalShare value false")
-			option.append("setoption name EvalShare value true")
-#			if i==0:
-#				option.append("setoption name EvalShare value false")
-#			else:
-#				option.append("setoption name EvalShare value true")
 			if nodes_time:
 				option.append("setoption name nodestime value 600")
 			if PARAMETERS_LOG_FILE_PATH :
@@ -352,8 +345,8 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 		p = procs[i]
 		# USI "position"
 		s = "position startpos"
-		if sfens[i/2] != "":
-			s += " moves " + sfens[i/2]
+		if sfens[i//2] != "":
+			s += " moves " + sfens[i//2]
 		send_cmd(i,s)
 
 		# USI "go"
@@ -371,11 +364,11 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 	def usinewgame_cmd(i,sfen_no):
 		p = procs[i]
 		send_cmd(i,"usinewgame")
-		sfens[i/2] = book_sfens[sfen_no]
-		moves[i/2] = 0
+		sfens[i//2] = book_sfens[sfen_no]
+		moves[i//2] = 0
 		candidate_values[i//2] = []
 		# 定跡の評価値はよくわからんので0にしとくしかない。
-		eval_values[i/2] = "0 "*book_moves
+		eval_values[i//2] = "0 "*book_moves
 
 	# ゲームオーバーのハンドラ
 	# i : engine index
@@ -590,11 +583,11 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 
 		# 全エンジンの初期化がまだならisreadyを送る
 		for i in range(len(states)):
-			if states[i] == "init":
+			if states[i] == EngineState.INIT:
 				isready_cmd(i)
 			
 			# goコマンドを送信してから一定時間経過している場合のタイムアウト処理
-			if states[i] == "wait_for_bestmove" \
+			if states[i] == EngineState.WAIT_FOR_BESTMOVE \
 				and time.time() - go_times[i] >= (300 if "t" in opt2 else 60):
 				
 				go_times[i] = sys.maxsize # 再度タイムアウトしないように
