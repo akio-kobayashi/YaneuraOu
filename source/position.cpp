@@ -657,7 +657,7 @@ Position& Position::set(const std::string& sfen, StateInfo* si) {
     // --- evaluate
 
 #if defined(USE_PIECE_VALUE)
-    st->materialValue = Eval::material(*this);
+    set_material_value(Eval::material(*this));
 #endif
 
 #if defined(USE_CLASSIC_EVAL)
@@ -2019,8 +2019,8 @@ void Position::do_move_impl(Move m, StateInfo& newSt, bool givesCheck, const T* 
     // 💡 memcpy()するので自動的にそうなっている。
 
 #if defined(USE_PIECE_VALUE)
-    st->materialValue =
-      (Value) (st->previous->materialValue + (Us == BLACK ? materialDiff : -materialDiff));
+    set_material_value(
+      (Value) (st->previous->materialValue + (Us == BLACK ? materialDiff : -materialDiff)));
     //ASSERT_LV5(st->materialValue == Eval::material(*this));
 #endif
 

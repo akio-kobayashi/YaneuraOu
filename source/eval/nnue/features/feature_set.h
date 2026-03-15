@@ -84,7 +84,7 @@ class FeatureSetBase {
   static void AppendChangedIndices(
       const PositionType& pos, TriggerEvent trigger,
       IndexListType removed[2], IndexListType added[2], bool reset[2]) {
-    const auto& dp = pos.state()->dirtyPiece;
+    const auto& dp = pos.dirty_piece();
     if (dp.dirty_num == 0) return;
 
     for (const auto perspective : COLOR) {

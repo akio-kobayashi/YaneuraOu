@@ -461,7 +461,7 @@ Value evaluate(const Position& pos) {
     // GlobalOptionsでeval hashを用いない設定になっているなら
     // eval hashへの照会をskipする。
     if (!GlobalOptions.use_eval_hash) {
-        ASSERT_LV5(pos.state()->materialValue == Eval::material(pos));
+        ASSERT_LV5(pos.material_value() == Eval::material(pos));
         return NNUE::ComputeScore(pos);
     }
 #endif

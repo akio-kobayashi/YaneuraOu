@@ -99,7 +99,7 @@ void HalfKPE9<AssociatedKing>::AppendChangedIndices(
   BonaPiece* pieces;
   Square sq_target_k;
   GetPieces(pos, perspective, &pieces, &sq_target_k);
-  const auto& dp = pos.state()->dirtyPiece;
+  const auto& dp = pos.dirty_piece();
 
   for (int i = 0; i < dp.dirty_num; ++i) {
     if (dp.pieceNo[i] >= PIECE_NUMBER_KING) continue;

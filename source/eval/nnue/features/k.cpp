@@ -30,7 +30,7 @@ void K::AppendActiveIndices(
 void K::AppendChangedIndices(
     const Position& pos, Color perspective,
     IndexList* removed, IndexList* added) {
-  const auto& dp = pos.state()->dirtyPiece;
+  const auto& dp = pos.dirty_piece();
   if (dp.pieceNo[0] >= PIECE_NUMBER_KING) {
     removed->push_back(
         dp.changed_piece[0].old_piece.from[perspective] - fe_end);

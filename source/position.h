@@ -800,6 +800,22 @@ public:
     void invalidate_nnue_score() { st->accumulator.computed_score = false; }
 #endif
 
+#if defined(USE_EVAL_LIST)
+    Eval::DirtyPiece& dirty_piece() { return st->dirtyPiece; }
+    const Eval::DirtyPiece& dirty_piece() const { return st->dirtyPiece; }
+#endif
+
+#if defined(USE_PIECE_VALUE)
+    Value material_value() const { return st->materialValue; }
+    void set_material_value(Value value) { st->materialValue = value; }
+#endif
+
+#if defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT))
+    Eval::EvalSum& eval_sum() { return st->sum; }
+    const Eval::EvalSum& eval_sum() const { return st->sum; }
+    void set_eval_sum(const Eval::EvalSum& value) { st->sum = value; }
+#endif
+
 	// put_piece()やremove_piece()を用いたときは、最後にupdate_bitboards()を呼び出して
     // bitboardの整合性を保つこと。
     // また、put_piece_simple()は、put_piece()の王の升(kingSquare)を更新しない版。do_move()で用いる。

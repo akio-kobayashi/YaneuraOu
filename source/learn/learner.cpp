@@ -2927,7 +2927,7 @@ void learn(Position&, istringstream& is)
 	//Eval::print_eval_stat(pos);
 	Eval::add_grad(pos, BLACK, 32.0 , false);
 	Eval::update_weights(1);
-	pos.state()->sum.p[2][0] = VALUE_NOT_EVALUATED;
+	pos.eval_sum().p[2][0] = VALUE_NOT_EVALUATED;
 	cout << Eval::evaluate(pos) << endl;
 	//Eval::print_eval_stat(pos);
 #endif

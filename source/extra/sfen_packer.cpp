@@ -585,7 +585,7 @@ Tools::Result Position::set_from_packed_sfen(const PackedSfen& sfen , StateInfo 
 	// --- evaluate
 
 #if defined(USE_CLASSIC_EVAL)
-    st->materialValue = Eval::material(*this);
+    set_material_value(Eval::material(*this));
 	Eval::compute_eval(*this);
 #endif
 
@@ -639,4 +639,3 @@ std::string Position::sfen_unpack(const PackedSfen& sfen)
 } // namespace YaneuraOu
 
 #endif // USE_SFEN_PACKER
-

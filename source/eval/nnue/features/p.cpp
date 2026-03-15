@@ -28,7 +28,7 @@ void P::AppendActiveIndices(
 void P::AppendChangedIndices(
     const Position& pos, Color perspective,
     IndexList* removed, IndexList* added) {
-  const auto& dp = pos.state()->dirtyPiece;
+  const auto& dp = pos.dirty_piece();
   for (int i = 0; i < dp.dirty_num; ++i) {
     if (dp.pieceNo[i] >= PIECE_NUMBER_KING) continue;
     removed->push_back(dp.changed_piece[i].old_piece.from[perspective]);

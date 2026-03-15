@@ -82,7 +82,7 @@ namespace Mate {
 				// わりとアリなのでは…。
 
 				// 先手から見た駒割
-				int value = pos.state()->materialValue;
+				int value = pos.material_value();
 
 				// いまの手番側
 				auto us = pos.side_to_move();

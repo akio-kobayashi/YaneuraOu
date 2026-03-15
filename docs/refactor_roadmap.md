@@ -192,6 +192,8 @@ Current status:
 - Initial transitional wrapper introduced on the search side as `Search::EvaluationContext`.
 - This keeps existing behavior while creating a seam for later evaluator-state ownership changes.
 - Classic NNUE accumulator access is now routed through `Position` helper methods instead of open-coded `state()->accumulator` references.
+- Classic-eval `materialValue`, `DirtyPiece`, and `EvalSum` access is now also routed through `Position` helper methods or setter helpers in active evaluator code paths.
+- Remaining work in this phase is mainly storage relocation, compatibility cleanup, and non-active textual references rather than broad search/eval call-site churn.
 
 ### Phase C: Move evaluator ownership
 - Relocate evaluator-local mutable state out of `StateInfo` in small slices.

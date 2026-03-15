@@ -87,7 +87,7 @@ void PE9::AppendChangedIndices(
     IndexList* removed, IndexList* added) {
   BonaPiece* pieces;
   GetPieces(pos, perspective, &pieces);
-  const auto& dp = pos.state()->dirtyPiece;
+  const auto& dp = pos.dirty_piece();
 
   for (int i = 0; i < dp.dirty_num; ++i) {
     if (dp.pieceNo[i] >= PIECE_NUMBER_KING) continue;

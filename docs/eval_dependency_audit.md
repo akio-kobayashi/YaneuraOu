@@ -302,6 +302,38 @@ Purpose:
 - reduce direct `state()->accumulator` coupling in classic NNUE code paths
 - make future movement of evaluator-local state out of `StateInfo` possible without forcing search or NNUE code to know the storage layout
 
+### Slice 12: classic-eval material, dirty-piece, and eval-sum state use `Position` accessors
+
+Implemented in:
+- [`position.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.h)
+- [`position.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.cpp)
+- [`extra/sfen_packer.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/extra/sfen_packer.cpp)
+- [`eval/material/evaluate_material.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/eval/material/evaluate_material.cpp)
+- [`mate/mate_move_picker.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/mate/mate_move_picker.h)
+- [`eval/nnue/features/feature_set.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/eval/nnue/features/feature_set.h)
+- [`eval/nnue/features/k.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/eval/nnue/features/k.cpp)
+- [`eval/nnue/features/p.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/eval/nnue/features/p.cpp)
+- [`eval/nnue/features/pe9.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/eval/nnue/features/pe9.cpp)
+- [`eval/nnue/features/half_kp.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/eval/nnue/features/half_kp.cpp)
+- [`eval/nnue/features/half_kp_vm.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/eval/nnue/features/half_kp_vm.cpp)
+- [`eval/nnue/features/half_relative_kp.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/eval/nnue/features/half_relative_kp.cpp)
+- [`eval/nnue/features/half_kpe9.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/eval/nnue/features/half_kpe9.cpp)
+- [`eval/kppt/evaluate_kppt.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/eval/kppt/evaluate_kppt.cpp)
+- [`eval/kpp_kkpt/evaluate_kpp_kkpt.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/eval/kpp_kkpt/evaluate_kpp_kkpt.cpp)
+- [`learn/learner.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/learn/learner.cpp)
+
+Added helpers:
+- `Position::dirty_piece()`
+- `Position::material_value()`
+- `Position::set_material_value(...)`
+- `Position::eval_sum()`
+- `Position::set_eval_sum(...)`
+
+Purpose:
+- remove remaining open-coded `state()->dirtyPiece`, `state()->materialValue`, and `state()->sum` accesses from active evaluator code paths
+- finish the access-boundary step for classic-eval state without changing storage ownership yet
+- leave `config.h` comments as the only remaining `state()->dirtyPiece` textual reference in the tree
+
 ## Non-Goals For The First Pass
 
 Do not start by:

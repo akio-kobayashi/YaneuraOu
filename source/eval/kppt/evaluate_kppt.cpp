@@ -370,7 +370,7 @@ namespace Eval {
 	const int FV_SCALE = 32;
 
 	// 評価関数。全計算。(駒割りは差分)
-	// 返し値は持たず、計算結果としてpos.state()->sumに値を代入する。
+		// 返し値は持たず、計算結果としてpos.eval_sum()に値を代入する。
 	void compute_eval_impl(const Position& pos)
 	{
 		// is_ready()で評価関数を読み込み、
@@ -457,10 +457,8 @@ namespace Eval {
 			sum.p[2] += kkp[sq_bk][sq_wk][k0];
 		}
 
-		auto st = pos.state();
-		sum.p[2][0] += st->materialValue * FV_SCALE;
-
-		st->sum = sum;
+		sum.p[2][0] += pos.material_value() * FV_SCALE;
+		pos_.set_eval_sum(sum);
 	}
 
 	// 評価関数。差分計算ではなく全計算する。
@@ -470,7 +468,7 @@ namespace Eval {
 	Value compute_eval(const Position& pos)
 	{
 		compute_eval_impl(pos);
-		return Value(pos.state()->sum.sum(pos.side_to_move()) / FV_SCALE);
+		return Value(pos.eval_sum().sum(pos.side_to_move()) / FV_SCALE);
 	}
 
 	// 後手玉が移動したときの先手玉に対するの差分
@@ -856,7 +854,7 @@ namespace Eval {
 				}
 			}
 
-			// sumの計算が終わったのでpos.state()->sumに反映させておく。(これがこの関数の返し値に相当する。)
+			// sumの計算が終わったのでpos.eval_sum()に反映させておく。(これがこの関数の返し値に相当する。)
 			now->sum = diff;
 
 		} else {
@@ -941,7 +939,7 @@ namespace Eval {
 		if (!GlobalOptions.use_eval_hash)
 		{
 			evaluateBody(pos);
-			ASSERT_LV5(pos.state()->materialValue == Eval::material(pos));
+			ASSERT_LV5(pos.material_value() == Eval::material(pos));
 			return Value(sum.sum(pos.side_to_move()) / FV_SCALE);
 		}
 #endif
@@ -977,7 +975,7 @@ namespace Eval {
 		*g_evalTable[key] = sum;
 #endif
 
-		ASSERT_LV5(pos.state()->materialValue == Eval::material(pos));
+		ASSERT_LV5(pos.material_value() == Eval::material(pos));
 		// 差分計算と非差分計算との計算結果が合致するかのテスト。(さすがに重いのでコメントアウトしておく)
 		// ASSERT_LV5(Value(st->sum.sum(pos.side_to_move()) / FV_SCALE) == compute_eval(pos));
 		
@@ -1005,7 +1003,7 @@ namespace Eval {
 
 #if !defined(USE_EVAL_MAKE_LIST_FUNCTION)
 		// まだ評価値が計算されていないなら
-		if (!pos.state()->sum.evaluated())
+		if (!pos.eval_sum().evaluated())
 			evaluate(pos);
 #else
 		// EvalListの組み換えを行なっているときは通常の差分計算ルーチンが機能しないので
@@ -1201,7 +1199,7 @@ namespace Eval {
 
 		}
 
-		cout << "Material = " << pos.state()->materialValue << endl;
+		cout << "Material = " << pos.material_value() << endl;
 		cout << sum;
 		cout << "---" << endl;
 
