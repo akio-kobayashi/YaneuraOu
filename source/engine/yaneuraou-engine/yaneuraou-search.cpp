@@ -632,6 +632,46 @@ Value qsearch_futility_base_from_normalized_static_eval(const Value staticEval) 
     return staticEval + 352;
 }
 
+Value search_outcome_delta_from_normalized_static_eval(const Value searchOutcome,
+                                                       const Value normalizedStaticEval) {
+    return searchOutcome - normalizedStaticEval;
+}
+
+bool is_large_fail_low_against_normalized_static_eval(const bool  inCheck,
+                                                      const Value searchOutcome,
+                                                      const Value normalizedStaticEval) {
+    return !inCheck && searchOutcome <= normalizedStaticEval - 92;
+}
+
+bool is_opponent_large_fail_low_against_normalized_static_eval(
+  const bool inCheck,
+  const Value searchOutcome,
+  const Value previousPlyStaticEval) {
+    return !inCheck && searchOutcome <= -previousPlyStaticEval - 70;
+}
+
+bool should_apply_correction_history_from_normalized_static_eval(const bool  inCheck,
+                                                                 const bool  bestMoveIsCapture,
+                                                                 const Value searchOutcome,
+                                                                 const Value normalizedStaticEval,
+                                                                 const Value beta,
+                                                                 const bool  hasBestMove) {
+    return !inCheck && !bestMoveIsCapture
+           && ((searchOutcome < normalizedStaticEval && searchOutcome < beta)
+               || (searchOutcome > normalizedStaticEval && hasBestMove));
+}
+
+int correction_history_bonus_from_normalized_static_eval_delta(const Value searchOutcomeDelta,
+                                                               const Depth depth,
+                                                               const bool  isPositiveCorrection) {
+    return std::clamp(int(searchOutcomeDelta) * depth / (8 + isPositiveCorrection),
+                      -CORRECTION_HISTORY_LIMIT / 4, CORRECTION_HISTORY_LIMIT / 4);
+}
+
+int correction_history_scale_from_normalized_static_eval_delta(const bool isPositiveCorrection) {
+    return 1088 - 180 * isPositiveCorrection;
+}
+
 // Transitional compatibility helper. Existing code still refers to corrected static eval.
 Value to_corrected_static_eval(const Value v, const int cv) {
 	return normalize_static_eval(v, cv);
@@ -4038,8 +4078,10 @@ moves_loop:  // When in check, search starts here
         bonusScale -= (ss - 1)->statScore / 104;
         bonusScale += std::min(63 * depth, 508);
         bonusScale += 184 * ((ss - 1)->moveCount > 8);
-        bonusScale += 143 * (!ss->inCheck && bestValue <= ss->staticEval - 92);
-        bonusScale += 149 * (!(ss - 1)->inCheck && bestValue <= -(ss - 1)->staticEval - 70);
+        bonusScale += 143 * is_large_fail_low_against_normalized_static_eval(
+          ss->inCheck, bestValue, ss->staticEval);
+        bonusScale += 149 * is_opponent_large_fail_low_against_normalized_static_eval(
+          (ss - 1)->inCheck, bestValue, (ss - 1)->staticEval);
 
         bonusScale = std::max(bonusScale, 0);
 
@@ -4120,15 +4162,19 @@ moves_loop:  // When in check, search starts here
     // Adjust correction history
 	// correction historyの調整
 
-	if (!ss->inCheck && !(bestMove && pos.capture(bestMove))
-        && ((bestValue < ss->staticEval && bestValue < beta)  // negative correction & no fail high
-            || (bestValue > ss->staticEval && bestMove)))     // positive correction & no fail low
+    const bool bestMoveIsCapture = bestMove && pos.capture(bestMove);
+    if (should_apply_correction_history_from_normalized_static_eval(
+          ss->inCheck, bestMoveIsCapture, bestValue, ss->staticEval, beta, bool(bestMove)))
     {
-        auto bonus =
-          std::clamp(int(bestValue - ss->staticEval) * depth / (8 + (bestValue > ss->staticEval)),
-                     -CORRECTION_HISTORY_LIMIT / 4, CORRECTION_HISTORY_LIMIT / 4);
-        update_correction_history(pos, ss, *this,
-                                  (1088 - 180 * (bestValue > ss->staticEval)) * bonus / 1024);
+        const Value searchOutcomeDelta =
+          search_outcome_delta_from_normalized_static_eval(bestValue, ss->staticEval);
+        const bool isPositiveCorrection = bestValue > ss->staticEval;
+        const auto bonus = correction_history_bonus_from_normalized_static_eval_delta(
+          searchOutcomeDelta, depth, isPositiveCorrection);
+        update_correction_history(
+          pos, ss, *this,
+          correction_history_scale_from_normalized_static_eval_delta(isPositiveCorrection) * bonus
+            / 1024);
     }
 
 	// 👉 qsearch()内の末尾にあるassertの文の説明を読むこと。

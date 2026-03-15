@@ -181,6 +181,23 @@ Purpose:
 - isolate evaluator-scale assumptions inside named futility helpers
 - keep capture/quiet futility and qsearch futility base tied to normalized static eval semantics
 
+### Slice 4: correction/history updates consume normalized static eval deltas
+
+Implemented in:
+- [`yaneuraou-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.cpp)
+
+Added helpers:
+- `search_outcome_delta_from_normalized_static_eval(...)`
+- `is_large_fail_low_against_normalized_static_eval(...)`
+- `is_opponent_large_fail_low_against_normalized_static_eval(...)`
+- `should_apply_correction_history_from_normalized_static_eval(...)`
+- `correction_history_bonus_from_normalized_static_eval_delta(...)`
+- `correction_history_scale_from_normalized_static_eval_delta(...)`
+
+Purpose:
+- make fail-low bonus and correction-history updates explicitly depend on search-outcome versus normalized-static-eval deltas
+- keep existing tuning while reducing direct score-scale arithmetic at the call sites
+
 ## Non-Goals For The First Pass
 
 Do not start by:
