@@ -691,6 +691,7 @@ def main():
 	parser.add_argument('--multipv', type=int, default=1, help="Number of candidate lines to request from the engine.")
 
 	# --- Opening book settings ---
+	parser.add_argument('--book_file', type=str, default="", help="Optional opening SFEN file under home/book or an absolute path. If omitted, games start from the initial position.")
 	parser.add_argument('--book_moves', type=int, default=24, help="Number of moves to follow from the opening book.")
 	parser.add_argument('--rand_book', action='store_true', help="Shuffle the opening book entries.")
 
@@ -745,6 +746,7 @@ def main():
 	engine2_path = config['engine2']
 	eval1_path = config['eval1']
 	eval2_path = config['eval2']
+	book_file_path = config['book_file']
 	book_moves = config['book_moves']
 	multipv = config['multipv']
 	play_time_list = config['time'].split(",")
@@ -767,7 +769,8 @@ def main():
 	print("play_time_list : " , play_time_list)
 	print("evaldirs       : " , evaldirs)
 	print("hash size      : " , hashes)
-	print("book_moves     : " , book_moves)
+	print("book_file      : " , book_file_path if book_file_path else "(initial position)")
+	print("book_moves     : " , book_moves if book_file_path else "(disabled)")
 	print("multipv        : " , multipv)
 	print("engine_threads : " , engine_threads)
 	print("rand_book      : " , rand_book)
@@ -777,28 +780,35 @@ def main():
 	total_win = total_lose = total_draw = 0
 	total_win_black = total_win_white = 0
 
-	book_file = open(os.path.join(home, "book", "records2016_10818.sfen"),"r")
 	book_sfens = []
-	count = 1
-	for sfen in book_file:
-		s = sfen.split()
-		sf = ""
-		for i in range(book_moves):
-			try:
-				# skip "startpos moves"
-				sf += s[i+2]+" "
-			except:
-				print("Error! " + " in records2016.sfen line = " + str(count))
-		book_sfens.append(sf)
-		count += 1
-		if count % 100 == 0:
-			sys.stdout.write(".")
-			sys.stdout.flush()
-	book_file.close()
-	print()
+	if book_file_path:
+		resolved_book_file = book_file_path
+		if not os.path.isabs(resolved_book_file):
+			resolved_book_file = os.path.join(home, "book", resolved_book_file)
+
+		with open(resolved_book_file, "r") as book_file:
+			count = 1
+			for sfen in book_file:
+				s = sfen.split()
+				sf = ""
+				for i in range(book_moves):
+					try:
+						# skip "startpos moves"
+						sf += s[i+2] + " "
+					except Exception:
+						print("Error! " + " in " + os.path.basename(resolved_book_file) + " line = " + str(count))
+						break
+				book_sfens.append(sf.strip())
+				count += 1
+				if count % 100 == 0:
+					sys.stdout.write(".")
+					sys.stdout.flush()
+		print()
+	else:
+		book_sfens = [""]
 
 	# 定跡をシャッフルする
-	if rand_book:
+	if rand_book and len(book_sfens) > 1:
 		random.shuffle(book_sfens)
 
 	# threadsはparallel_gamesに相当。 engine_threadsはエンジンに渡すスレッド数。
