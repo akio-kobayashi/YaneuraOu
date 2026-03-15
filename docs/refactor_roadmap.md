@@ -133,11 +133,12 @@ Recommended first slice:
 Recommended order:
 
 1. evaluator score-semantics cleanup
-2. `Position` / evaluator decoupling
-3. Thread-context and NUMA ownership cleanup
-4. Macro reduction through config abstraction
-5. Build-system modernization
-6. SIMD/vendor-specific cleanup after ownership and build boundaries are clearer
+2. search-entry predicate cleanup on normalized static eval
+3. `Position` / evaluator decoupling
+4. Thread-context and NUMA ownership cleanup
+5. Macro reduction through config abstraction
+6. Build-system modernization
+7. SIMD/vendor-specific cleanup after ownership and build boundaries are clearer
 
 Rationale:
 - Numeric score coupling must be reduced before evaluator boundaries are truly clean.
@@ -151,6 +152,7 @@ Rationale:
 - Separate evaluator output meaning from search score usage.
 - Introduce explicit helpers or types for conversion boundaries.
 - Identify heuristic thresholds that currently assume a specific evaluator scale.
+- Migrate `improving`, `opponentWorsening`, razoring, null-move entry, and probcut entry to named helpers that explicitly consume normalized static eval.
 
 ### Phase B: Create stable interfaces
 - Introduce evaluator-facing interfaces and compatibility wrappers.
@@ -184,9 +186,8 @@ The following are out of scope for this branch:
 ## Immediate Next Step
 
 The next implementation slice on this branch should be:
-- audit where search depends on static evaluation scale and meaning,
-- add explicit conversion boundaries for evaluator output,
-- introduce an evaluation context abstraction,
-- remove direct NNUE accumulator ownership from `Position`,
+- continue migrating remaining search heuristics that depend on normalized static eval,
+- then introduce an evaluation context abstraction,
+- then remove direct NNUE accumulator ownership from `Position`,
 - keep existing NNUE behavior through a transitional compatibility layer,
 - and verify each step against [`docs/eval_value_contract.md`](/Users/akio/Documents/GitHub/YaneuraOu/docs/eval_value_contract.md).

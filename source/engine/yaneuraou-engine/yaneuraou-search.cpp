@@ -548,6 +548,39 @@ Value merge_tt_into_static_eval_estimate(const Value normalizedStaticEval,
     return normalizedStaticEval;
 }
 
+// Search-side predicates should consume normalized static eval, not raw evaluator output.
+bool is_improving_from_normalized_static_eval(const Value currentNormalizedStaticEval,
+                                              const Value priorSameSideStaticEval) {
+    return currentNormalizedStaticEval > priorSameSideStaticEval;
+}
+
+bool is_opponent_worsening_from_normalized_static_eval(const Value currentNormalizedStaticEval,
+                                                       const Value previousPlyStaticEval) {
+    return currentNormalizedStaticEval > -previousPlyStaticEval;
+}
+
+bool should_razor_from_normalized_static_eval(const bool  isPvNode,
+                                              const Value staticEvalEstimate,
+                                              const Value alpha,
+                                              const Depth depth) {
+    return !isPvNode && staticEvalEstimate < alpha - 514 - 294 * depth * depth;
+}
+
+bool should_try_null_move_from_normalized_static_eval(const bool  isCutNode,
+                                                      const Value normalizedStaticEval,
+                                                      const Value beta,
+                                                      const Depth depth,
+                                                      const bool  hasExcludedMove,
+                                                      const int   ply,
+                                                      const int   nmpMinPly) {
+    return isCutNode && normalizedStaticEval >= beta - 18 * depth + 390 && !hasExcludedMove
+           && ply >= nmpMinPly && !is_loss(beta);
+}
+
+Value probcut_beta_from_improving_flag(const Value beta, const bool improving) {
+    return beta + 224 - 64 * improving;
+}
+
 // Transitional compatibility helper. Existing code still refers to corrected static eval.
 Value to_corrected_static_eval(const Value v, const int cv) {
 	return normalize_static_eval(v, cv);
@@ -2801,7 +2834,8 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
 		💡 VALUE_NONE == 32002なのでこれより大きなstaticEvalの値であることはない。
 	*/
 
-    improving = ss->staticEval > (ss - 2)->staticEval;
+    improving =
+      is_improving_from_normalized_static_eval(ss->staticEval, (ss - 2)->staticEval);
 
 	/*
 		📝 opponentWorseningは、相手の状況が悪化しているかのフラグ。
@@ -2811,7 +2845,8 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
 		    相手の評価値が悪くなっていっていることを意味している。
 	*/
 
-    opponentWorsening = ss->staticEval > -(ss - 1)->staticEval;
+    opponentWorsening = is_opponent_worsening_from_normalized_static_eval(
+      ss->staticEval, (ss - 1)->staticEval);
 
 	// 1手前のreductionに応じた残りdepthの調整
 
@@ -2830,7 +2865,7 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
 	// 評価値が非常に低い場合、検索を完全にスキップして qsearch の値を返します。
     // PvNode では、チェックメイトが返されるのを防ぐためのガードが必要です。
 
-    if (!PvNode && eval < alpha - 514 - 294 * depth * depth)
+    if (should_razor_from_normalized_static_eval(PvNode, eval, alpha, depth))
         return qsearch<NonPV>(pos, ss, alpha, beta);
 
 	// -----------------------
@@ -2877,13 +2912,13 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
     // -----------------------
 
     //  🖊 evalがbetaを超えているので1手パスしてもbetaは超えそう。だからnull moveを試す
-    if (cutNode && ss->staticEval >= beta - 18 * depth + 390 && !excludedMove
+    if (should_try_null_move_from_normalized_static_eval(
+          cutNode, ss->staticEval, beta, depth, bool(excludedMove), ss->ply, nmpMinPly)
 #if STOCKFISH
         && pos.non_pawn_material(us)
     // 💡 盤上にpawn以外の駒がある ≒ pawnだけの終盤ではない。
     // 🤔 将棋でもこれに相当する条件が必要かも。
 #endif
-        && ss->ply >= nmpMinPly && !is_loss(beta)
         // 同じ手番側に連続してnull moveを適用しない
     )
     {
@@ -2997,7 +3032,7 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
     // 直前の手を（ほぼ）安全に枝刈りできます。
 
 	// probCutに使うbeta値。
-	probCutBeta = beta + 224 - 64 * improving;
+	probCutBeta = probcut_beta_from_improving_flag(beta, improving);
 
 	if (depth >= 3
         && !is_decisive(beta)

@@ -134,6 +134,36 @@ Start with the smallest central seam:
 
 These changes expose the semantic contract without immediately rewriting every pruning constant.
 
+## Completed Initial Slices
+
+### Slice 1: raw eval / normalized static eval / TT estimate seam
+
+Implemented in:
+- [`yaneuraou-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.cpp)
+
+Added helpers:
+- `normalize_static_eval(...)`
+- `merge_tt_into_static_eval_estimate(...)`
+
+Purpose:
+- make the first semantic boundary explicit without changing tuning constants
+
+### Slice 2: search-entry predicates consume normalized static eval
+
+Implemented in:
+- [`yaneuraou-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.cpp)
+
+Added helpers:
+- `is_improving_from_normalized_static_eval(...)`
+- `is_opponent_worsening_from_normalized_static_eval(...)`
+- `should_razor_from_normalized_static_eval(...)`
+- `should_try_null_move_from_normalized_static_eval(...)`
+- `probcut_beta_from_improving_flag(...)`
+
+Purpose:
+- make it explicit that these search heuristics depend on normalized static eval semantics
+- keep pruning formulas stable while moving evaluator-scale assumptions behind named predicates
+
 ## Non-Goals For The First Pass
 
 Do not start by:
