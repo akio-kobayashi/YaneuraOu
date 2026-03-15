@@ -198,6 +198,20 @@ Purpose:
 - make fail-low bonus and correction-history updates explicitly depend on search-outcome versus normalized-static-eval deltas
 - keep existing tuning while reducing direct score-scale arithmetic at the call sites
 
+### Slice 5: qsearch stand-pat semantics use named helpers
+
+Implemented in:
+- [`yaneuraou-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.cpp)
+
+Added helpers:
+- `soften_qsearch_stand_pat_fail_high(...)`
+- `qsearch_alpha_from_stand_pat(...)`
+- `qsearch_capture_futility_value_from_normalized_static_eval(...)`
+
+Purpose:
+- make qsearch stand-pat updates explicit instead of leaving semantic meaning inside inline arithmetic
+- keep qsearch futility estimates tied to normalized static eval semantics
+
 ## Non-Goals For The First Pass
 
 Do not start by:

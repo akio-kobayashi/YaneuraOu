@@ -155,6 +155,7 @@ Rationale:
 - Migrate `improving`, `opponentWorsening`, razoring, null-move entry, and probcut entry to named helpers that explicitly consume normalized static eval.
 - Migrate futility margins, move-count skip thresholds, and qsearch futility base to named helpers that explicitly consume normalized static eval.
 - Migrate fail-low bonus and correction-history updates to named helpers that explicitly consume search-outcome versus normalized-static-eval deltas.
+- Migrate qsearch stand-pat updates and qsearch capture-futility estimates to named helpers.
 
 ### Phase B: Create stable interfaces
 - Introduce evaluator-facing interfaces and compatibility wrappers.

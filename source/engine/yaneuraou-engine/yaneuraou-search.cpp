@@ -672,6 +672,22 @@ int correction_history_scale_from_normalized_static_eval_delta(const bool isPosi
     return 1088 - 180 * isPositiveCorrection;
 }
 
+Value soften_qsearch_stand_pat_fail_high(const Value standPat, const Value beta) {
+    if (!is_decisive(standPat))
+        return (standPat + beta) / 2;
+    return standPat;
+}
+
+Value qsearch_alpha_from_stand_pat(const Value alpha, const Value standPat) {
+    return standPat > alpha ? standPat : alpha;
+}
+
+Value qsearch_capture_futility_value_from_normalized_static_eval(
+  const Value futilityBase,
+  const Value capturedPieceValue) {
+    return futilityBase + capturedPieceValue;
+}
+
 // Transitional compatibility helper. Existing code still refers to corrected static eval.
 Value to_corrected_static_eval(const Value v, const int cv) {
 	return normalize_static_eval(v, cv);
@@ -4566,9 +4582,8 @@ Value Search::YaneuraOuWorker::qsearch(Position& pos, Stack* ss, Value alpha, Va
 
         if (bestValue >= beta)
         {
-            if (!is_decisive(bestValue))
-                // bestValueを少しbetaのほうに寄せる。
-                bestValue = (bestValue + beta) / 2;
+            // bestValueを少しbetaのほうに寄せる。
+            bestValue = soften_qsearch_stand_pat_fail_high(bestValue, beta);
 
             if (!ss->ttHit)
                 ttWriter.write(posKey, value_to_tt(bestValue, ss->ply), false, BOUND_LOWER,
@@ -4582,8 +4597,7 @@ Value Search::YaneuraOuWorker::qsearch(Position& pos, Stack* ss, Value alpha, Va
 				大きいならそれをalphaの初期値に使う。
 				王手がかかっているなら全部の指し手を調べたほうがいい。
 		*/ 
-		if (bestValue > alpha)
-            alpha = bestValue;
+        alpha = qsearch_alpha_from_stand_pat(alpha, bestValue);
 
 		// 💡 futilityの基準となる値をbestValueにmargin値を加算したものとして、
         //     これを下回るようであれば枝刈りする。
@@ -4687,8 +4701,8 @@ Value Search::YaneuraOuWorker::qsearch(Position& pos, Stack* ss, Value alpha, Va
 					📊 【計測資料 14.】 futility pruningのときにpromoteを考慮するかどうか。
 				*/
 
-                Value futilityValue = futilityBase +
-                                    PieceValue[pos.piece_on(move.to_sq())];
+                Value futilityValue = qsearch_capture_futility_value_from_normalized_static_eval(
+                  futilityBase, PieceValue[pos.piece_on(move.to_sq())]);
                                 // ⚠　これ、加算した結果、s16に収まらない可能性があるが、
                                 //      計算はs32で行って、そのあと、この値を用いないからセーフ。
 
@@ -4851,8 +4865,8 @@ Value Search::YaneuraOuWorker::qsearch(Position& pos, Stack* ss, Value alpha, Va
                                    // rootから詰みまでの手数。
     }
 
-    if (!is_decisive(bestValue) && bestValue > beta)
-        bestValue = (bestValue + beta) / 2;
+    if (bestValue > beta)
+        bestValue = soften_qsearch_stand_pat_fail_high(bestValue, beta);
 
 	// 💡 盤面にkingとpawnしか残ってないときに特化したstalemate判定。
 	//     将棋では用いない。
