@@ -212,6 +212,19 @@ Purpose:
 - make qsearch stand-pat updates explicit instead of leaving semantic meaning inside inline arithmetic
 - keep qsearch futility estimates tied to normalized static eval semantics
 
+### Slice 6: TT search-score decoding and cutoff checks use named helpers
+
+Implemented in:
+- [`yaneuraou-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.cpp)
+
+Added helpers:
+- `search_score_from_tt_entry(...)`
+- `tt_bound_allows_search_score_cutoff(...)`
+
+Purpose:
+- make it explicit that `ttData.value` belongs to the search-score domain, not the normalized-static-eval domain
+- centralize TT score decoding and cutoff-bound interpretation for both main search and qsearch
+
 ## Non-Goals For The First Pass
 
 Do not start by:

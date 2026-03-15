@@ -156,6 +156,7 @@ Rationale:
 - Migrate futility margins, move-count skip thresholds, and qsearch futility base to named helpers that explicitly consume normalized static eval.
 - Migrate fail-low bonus and correction-history updates to named helpers that explicitly consume search-outcome versus normalized-static-eval deltas.
 - Migrate qsearch stand-pat updates and qsearch capture-futility estimates to named helpers.
+- Migrate TT score decoding and TT cutoff-bound interpretation to named search-score helpers shared by main search and qsearch.
 
 ### Phase B: Create stable interfaces
 - Introduce evaluator-facing interfaces and compatibility wrappers.

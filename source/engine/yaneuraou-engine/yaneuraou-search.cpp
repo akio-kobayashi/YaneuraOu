@@ -688,6 +688,26 @@ Value qsearch_capture_futility_value_from_normalized_static_eval(
     return futilityBase + capturedPieceValue;
 }
 
+Value search_score_from_tt_entry(const bool ttHit, const Value ttStoredValue, const int ply
+#if STOCKFISH
+                                 ,
+                                 const int rule50Count
+#endif
+) {
+#if STOCKFISH
+    return ttHit ? value_from_tt(ttStoredValue, ply, rule50Count) : VALUE_NONE;
+#else
+    return ttHit ? value_from_tt(ttStoredValue, ply) : VALUE_NONE;
+#endif
+}
+
+bool tt_bound_allows_search_score_cutoff(const Value ttSearchScore,
+                                         const Value beta,
+                                         const Bound ttBound) {
+    return is_valid(ttSearchScore)
+           && (ttBound & (ttSearchScore >= beta ? BOUND_LOWER : BOUND_UPPER));
+}
+
 // Transitional compatibility helper. Existing code still refers to corrected static eval.
 Value to_corrected_static_eval(const Value v, const int cv) {
 	return normalize_static_eval(v, cv);
@@ -2429,8 +2449,13 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
     // singular searchとIIDとのスレッド競合を考慮して、ttValue , ttMoveの順で取り出さないといけないらしい。
     // cf. More robust interaction of singular search and iid : https://github.com/official-stockfish/Stockfish/commit/16b31bb249ccb9f4f625001f9772799d286e2f04
 
-	ttData.value =
-          ttHit ? value_from_tt(ttData.value, ss->ply /*, pos.rule50_count()*/) : VALUE_NONE;
+	ttData.value = search_score_from_tt_entry(
+      ttHit, ttData.value, ss->ply
+#if STOCKFISH
+      ,
+      pos.rule50_count()
+#endif
+    );
 
 	// 📝 置換表の指し手にpseudo_legalではない指し手が混じっていたら、
 	//     それは先後の局面を間違えた置換表Entryに書き出してしまっているバグ。
@@ -2472,9 +2497,8 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
 	if (!PvNode
 		&& !excludedMove
 		&& ttData.depth > depth - (ttData.value <= beta) // 置換表に登録されている探索深さのほうが深くて
-        && is_valid(ttData.value)   // Can happen when !ttHit or when access race in probe()
 							        // !ttHitの場合やprobe()でのアクセス競合時に発生する可能性がありうる。
-        && (ttData.bound & (ttData.value >= beta ? BOUND_LOWER : BOUND_UPPER))
+        && tt_bound_allows_search_score_cutoff(ttData.value, beta, ttData.bound)
         && (cutNode == (ttData.value >= beta) || depth > 5)
 #if STOCKFISH
 		// avoid a TT cutoff if the rule50 count is high and the TT move is zeroing
@@ -4419,12 +4443,13 @@ Value Search::YaneuraOuWorker::qsearch(Position& pos, Stack* ss, Value alpha, Va
     ss->ttHit   = ttHit;
     ttData.move = ttHit ? ttData.move : Move::none();
 
-    ttData.value =
+    ttData.value = search_score_from_tt_entry(
+      ttHit, ttData.value, ss->ply
 #if STOCKFISH
-      ttHit ? value_from_tt(ttData.value, ss->ply , pos.rule50_count()) : VALUE_NONE;
-#else
-      ttHit ? value_from_tt(ttData.value, ss->ply ) : VALUE_NONE;
-#endif      
+      ,
+      pos.rule50_count()
+#endif
+    );
     pvHit = ttHit && ttData.is_pv;
 
     // 📌 やねうら王では置換表に先後間違えて書き出すバグを生じうるので、このassert追加する。
@@ -4439,9 +4464,7 @@ Value Search::YaneuraOuWorker::qsearch(Position& pos, Stack* ss, Value alpha, Va
 	*/
 
     if (!PvNode && ttData.depth >= DEPTH_QS
-        && is_valid(ttData.value)  // Can happen when !ttHit or when access race in probe()
-        // 置換表から取り出したときに他スレッドが値を潰している可能性がありうる
-        && (ttData.bound & (ttData.value >= beta ? BOUND_LOWER : BOUND_UPPER)))
+        && tt_bound_allows_search_score_cutoff(ttData.value, beta, ttData.bound))
         /*
 				💡 ↑ここは、↓この意味。
 				&& (ttData.value >= beta ? (ttData.bound & BOUND_LOWER)
