@@ -29,42 +29,170 @@ Position::~Position() {
     release_evaluator_storage();
 }
 
-void Position::release_evaluator_storage() {
-#if !STOCKFISH
-#if defined(USE_EVAL_LIST)
-    release_eval_list_sidecar();
+void Position::EvaluatorStorage::reset() {
+#if defined(EVAL_NNUE)
+    while (nnueAccumulatorSlots)
+    {
+        auto* next = nnueAccumulatorSlots->next;
+        delete nnueAccumulatorSlots;
+        nnueAccumulatorSlots = next;
+    }
 #endif
 #if defined(USE_PIECE_VALUE) || (defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(USE_EVAL_LIST)))
-    release_classic_eval_state_slots();
+    while (classicEvalStateSlots)
+    {
+        auto* next = classicEvalStateSlots->next;
+        delete classicEvalStateSlots;
+        classicEvalStateSlots = next;
+    }
+#endif
+#if defined(USE_EVAL_LIST)
+    evalListSidecar.evalList.clear();
+#endif
+}
+
+#if defined(USE_PIECE_VALUE) || (defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(USE_EVAL_LIST)))
+ClassicEvalState* Position::EvaluatorStorage::bind_classic_eval_state(StateInfo* state) {
+    ASSERT_LV3(state);
+
+    if (state->classicEvalState)
+        return state->classicEvalState;
+
+    for (auto* slot = classicEvalStateSlots; slot; slot = slot->next)
+        if (slot->owner == state)
+        {
+            state->classicEvalState = &slot->state;
+            return state->classicEvalState;
+        }
+
+    auto* slot  = new ClassicEvalStateSlot();
+    slot->owner = state;
+    slot->next  = classicEvalStateSlots;
+    classicEvalStateSlots = slot;
+    state->classicEvalState = &slot->state;
+    return state->classicEvalState;
+}
+#endif
+
+#if defined(EVAL_NNUE)
+Eval::NNUE::Accumulator* Position::EvaluatorStorage::bind_nnue_accumulator(StateInfo* state) {
+    ASSERT_LV3(state);
+
+    if (state->nnueAccumulator)
+        return state->nnueAccumulator;
+
+    for (auto* slot = nnueAccumulatorSlots; slot; slot = slot->next)
+        if (slot->owner == state)
+        {
+            state->nnueAccumulator = &slot->accumulator;
+            return state->nnueAccumulator;
+        }
+
+    auto* slot  = new NnueAccumulatorSlot();
+    slot->owner = state;
+    slot->next  = nnueAccumulatorSlots;
+    nnueAccumulatorSlots = slot;
+    state->nnueAccumulator = &slot->accumulator;
+    return state->nnueAccumulator;
+}
+#endif
+
+void Position::EvaluatorStorage::bind_state(StateInfo* state) {
+    ASSERT_LV3(state);
+
+#if defined(USE_PIECE_VALUE) || (defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(USE_EVAL_LIST)))
+    state->classicEvalState = nullptr;
+    bind_classic_eval_state(state);
 #endif
 #if defined(EVAL_NNUE)
-    release_nnue_accumulator_slots();
+    state->nnueAccumulator = nullptr;
+    bind_nnue_accumulator(state);
 #endif
-    if (evaluatorStorage == ownedEvaluatorStorage)
+}
+
+void Position::EvaluatorStorage::clone_state(const StateInfo* previousState, StateInfo* state) {
+    ASSERT_LV3(previousState);
+    ASSERT_LV3(state);
+
+    bind_state(state);
+
+#if defined(USE_PIECE_VALUE) || (defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(USE_EVAL_LIST)))
+    *state->classicEvalState = *previousState->classicEvalState;
+#endif
+#if defined(EVAL_NNUE)
+    *state->nnueAccumulator = *previousState->nnueAccumulator;
+#endif
+}
+
+void Position::EvaluatorStorageBinding::reset_active() {
+    if (active)
+        active->reset();
+}
+
+void Position::EvaluatorStorageBinding::release_all() {
+    reset_active();
+
+    if (active == owned)
     {
-        delete ownedEvaluatorStorage;
-        ownedEvaluatorStorage = nullptr;
-        evaluatorStorage = nullptr;
+        delete owned;
+        owned  = nullptr;
+        active = nullptr;
     }
+}
+
+void Position::EvaluatorStorageBinding::bind_external(EvaluatorStorage* storage) {
+    ASSERT_LV3(storage);
+    reset_active();
+    if (active == owned)
+        active = nullptr;
+    active = storage;
+}
+
+void Position::EvaluatorStorageBinding::detach_external() {
+    if (!has_external())
+        return;
+
+    reset_active();
+    active = nullptr;
+    ensure_local();
+}
+
+Position::EvaluatorStorage* Position::EvaluatorStorageBinding::ensure_local() {
+    if (!active)
+    {
+        if (!owned)
+            owned = new EvaluatorStorage();
+        active = owned;
+    }
+    return active;
+}
+
+const Position::EvaluatorStorage* Position::EvaluatorStorageBinding::current() const {
+    ASSERT_LV3(active);
+    return active;
+}
+
+void Position::release_evaluator_storage() {
+#if !STOCKFISH
+    evaluatorStorageBinding.release_all();
+#endif
+}
+
+void Position::reset_evaluator_storage() {
+#if !STOCKFISH
+    evaluatorStorageBinding.reset_active();
 #endif
 }
 
 void Position::bind_evaluator_storage() {
 #if !STOCKFISH
-    if (!evaluatorStorage)
-    {
-        if (!ownedEvaluatorStorage)
-            ownedEvaluatorStorage = new EvaluatorStorage();
-        evaluatorStorage = ownedEvaluatorStorage;
-    }
+    evaluatorStorageBinding.ensure_local();
 #endif
 }
 
 void Position::bind_external_evaluator_storage(EvaluatorStorage* storage) {
 #if !STOCKFISH
-    ASSERT_LV3(storage);
-    release_evaluator_storage();
-    evaluatorStorage = storage;
+    evaluatorStorageBinding.bind_external(storage);
 #else
     (void) storage;
 #endif
@@ -72,91 +200,17 @@ void Position::bind_external_evaluator_storage(EvaluatorStorage* storage) {
 
 void Position::detach_external_evaluator_storage() {
 #if !STOCKFISH
-    if (!has_external_evaluator_storage())
-        return;
-
-    release_evaluator_storage();
-    evaluatorStorage = nullptr;
-    bind_evaluator_storage();
+    evaluatorStorageBinding.detach_external();
 #endif
 }
 
-#if defined(USE_EVAL_LIST)
-void Position::release_eval_list_sidecar() {
-    // EvalList storage is embedded in EvaluatorStorage, so rebinding only
-    // needs a live owner object.
+Position::EvaluatorStorage* Position::active_evaluator_storage() {
+    return evaluatorStorageBinding.ensure_local();
 }
 
-void Position::bind_eval_list_sidecar() {
-    bind_evaluator_storage();
+const Position::EvaluatorStorage* Position::active_evaluator_storage() const {
+    return evaluatorStorageBinding.current();
 }
-#endif
-
-#if defined(USE_PIECE_VALUE) || (defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(USE_EVAL_LIST)))
-void Position::release_classic_eval_state_slots() {
-    while (evaluatorStorage && evaluatorStorage->classicEvalStateSlots)
-    {
-        auto* next = evaluatorStorage->classicEvalStateSlots->next;
-        delete evaluatorStorage->classicEvalStateSlots;
-        evaluatorStorage->classicEvalStateSlots = next;
-    }
-}
-
-void Position::bind_classic_eval_state(StateInfo* state) {
-    ASSERT_LV3(state);
-
-    if (state->classicEvalState)
-        return;
-
-    bind_evaluator_storage();
-
-    for (auto* slot = evaluatorStorage->classicEvalStateSlots; slot; slot = slot->next)
-        if (slot->owner == state)
-        {
-            state->classicEvalState = &slot->state;
-            return;
-        }
-
-    auto* slot  = new ClassicEvalStateSlot();
-    slot->owner = state;
-    slot->next  = evaluatorStorage->classicEvalStateSlots;
-    evaluatorStorage->classicEvalStateSlots = slot;
-    state->classicEvalState = &slot->state;
-}
-#endif
-
-#if defined(EVAL_NNUE)
-void Position::release_nnue_accumulator_slots() {
-    while (evaluatorStorage && evaluatorStorage->nnueAccumulatorSlots)
-    {
-        auto* next = evaluatorStorage->nnueAccumulatorSlots->next;
-        delete evaluatorStorage->nnueAccumulatorSlots;
-        evaluatorStorage->nnueAccumulatorSlots = next;
-    }
-}
-
-void Position::bind_nnue_accumulator(StateInfo* state) {
-    ASSERT_LV3(state);
-
-    if (state->nnueAccumulator)
-        return;
-
-    bind_evaluator_storage();
-
-    for (auto* slot = evaluatorStorage->nnueAccumulatorSlots; slot; slot = slot->next)
-        if (slot->owner == state)
-        {
-            state->nnueAccumulator = &slot->accumulator;
-            return;
-        }
-
-    auto* slot  = new NnueAccumulatorSlot();
-    slot->owner = state;
-    slot->next  = evaluatorStorage->nnueAccumulatorSlots;
-    evaluatorStorage->nnueAccumulatorSlots = slot;
-    state->nnueAccumulator = &slot->accumulator;
-}
-#endif
 
 // minor pieceは、香・桂・銀・金とその成駒に限ることにする。
 constexpr bool minor_piece_table[PIECE_NB] = {
@@ -549,8 +603,7 @@ void Position::set_state() const {
 
 // sfen文字列で盤面を設定する
 Position& Position::set(const std::string& sfen, StateInfo* si) {
-    auto* externalEvaluatorStorage = has_external_evaluator_storage() ? evaluatorStorage : nullptr;
-    release_evaluator_storage();
+    reset_evaluator_storage();
 
 #if STOCKFISH
 
@@ -568,19 +621,9 @@ Position& Position::set(const std::string& sfen, StateInfo* si) {
     std::memset(static_cast<void*>(si), 0, sizeof(StateInfo));
 #endif
 
-    evaluatorStorage = externalEvaluatorStorage;
     st = si;
 
-    bind_evaluator_storage();
-#if defined(USE_EVAL_LIST)
-    bind_eval_list_sidecar();
-#endif
-#if defined(USE_PIECE_VALUE) || (defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(USE_EVAL_LIST)))
-    bind_classic_eval_state(st);
-#endif
-#if defined(EVAL_NNUE)
-    bind_nnue_accumulator(st);
-#endif
+    active_evaluator_storage()->bind_state(st);
 
     // 変な入力をされることはあまり想定していない。
     // sfen文字列は、普通GUI側から渡ってくるのでおかしい入力であることはありえないからである。
@@ -1776,14 +1819,7 @@ void Position::do_move_impl(Move m, StateInfo& newSt, bool givesCheck, const T* 
     newSt.previous = st;
     st             = &newSt;
 
-#if defined(USE_PIECE_VALUE) || (defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(USE_EVAL_LIST)))
-    st->classicEvalState = nullptr;
-    bind_classic_eval_state(st);
-#endif
-#if defined(EVAL_NNUE)
-    st->nnueAccumulator = nullptr;
-    bind_nnue_accumulator(st);
-#endif
+    active_evaluator_storage()->bind_state(st);
 
     // --- 手数がらみのカウンターのインクリメント
 
@@ -2523,16 +2559,7 @@ void Position::do_null_move(StateInfo& newSt, const T& tt) {
 	newSt.previous = previousState;
     st             = &newSt;
 
-#if defined(USE_PIECE_VALUE) || (defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(USE_EVAL_LIST)))
-    st->classicEvalState = nullptr;
-    bind_classic_eval_state(st);
-    *st->classicEvalState = *previousState->classicEvalState;
-#endif
-#if defined(EVAL_NNUE)
-    st->nnueAccumulator = nullptr;
-    bind_nnue_accumulator(st);
-    *st->nnueAccumulator = *previousState->nnueAccumulator;
-#endif
+    active_evaluator_storage()->clone_state(previousState, st);
 
 #if STOCKFISH
 	if (st->epSquare != SQ_NONE)

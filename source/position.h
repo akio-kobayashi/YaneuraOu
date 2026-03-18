@@ -698,10 +698,10 @@ public:
 
 #if defined(USE_EVAL_LIST)
 	// 評価関数で使うための、どの駒番号の駒がどこにあるかなどの情報。
-	Eval::EvalList* eval_list() { return &evaluatorStorage->evalListSidecar.evalList; }
-	const Eval::EvalList* eval_list() const { return &evaluatorStorage->evalListSidecar.evalList; }
-	Eval::EvalList* mutable_eval_list() { return &evaluatorStorage->evalListSidecar.evalList; }
-	void clear_eval_list() { evaluatorStorage->evalListSidecar.evalList.clear(); }
+	Eval::EvalList* eval_list() { return active_evaluator_storage()->eval_list(); }
+	const Eval::EvalList* eval_list() const { return active_evaluator_storage()->eval_list(); }
+	Eval::EvalList* mutable_eval_list() { return active_evaluator_storage()->eval_list(); }
+	void clear_eval_list() { active_evaluator_storage()->eval_list()->clear(); }
 	int eval_list_length() const { return eval_list()->length(); }
 	const Eval::BonaPiece* eval_piece_list_fb() const { return eval_list()->piece_list_fb(); }
 	const Eval::BonaPiece* eval_piece_list_fw() const { return eval_list()->piece_list_fw(); }
@@ -1095,11 +1095,42 @@ public:
 #if defined(USE_EVAL_LIST)
         EvalListSidecar evalListSidecar{};
 #endif
+
+        void reset();
+
+#if defined(USE_EVAL_LIST)
+        Eval::EvalList*       eval_list() { return &evalListSidecar.evalList; }
+        const Eval::EvalList* eval_list() const { return &evalListSidecar.evalList; }
+#endif
+
+#if defined(USE_PIECE_VALUE) || (defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(USE_EVAL_LIST)))
+        ClassicEvalState* bind_classic_eval_state(StateInfo* state);
+#endif
+
+#if defined(EVAL_NNUE)
+        Eval::NNUE::Accumulator* bind_nnue_accumulator(StateInfo* state);
+#endif
+
+        void bind_state(StateInfo* state);
+        void clone_state(const StateInfo* previousState, StateInfo* state);
+    };
+
+    struct EvaluatorStorageBinding {
+        EvaluatorStorage* owned = nullptr;
+        EvaluatorStorage* active = nullptr;
+
+        bool has_external() const { return active && active != owned; }
+        void reset_active();
+        void release_all();
+        void bind_external(EvaluatorStorage* storage);
+        void detach_external();
+        EvaluatorStorage* ensure_local();
+        const EvaluatorStorage* current() const;
     };
 
     void bind_external_evaluator_storage(EvaluatorStorage* storage);
     void detach_external_evaluator_storage();
-    bool has_external_evaluator_storage() const { return evaluatorStorage && evaluatorStorage != ownedEvaluatorStorage; }
+    bool has_external_evaluator_storage() const { return evaluatorStorageBinding.has_external(); }
 
 private:
     // Initialization helpers (used while setting up a position)
@@ -1112,20 +1143,11 @@ private:
 	// StateInfoの初期化。Position::set()のタイミングで行われる。
 	void set_state() const;
 
-#if defined(EVAL_NNUE)
-    void release_nnue_accumulator_slots();
-    void bind_nnue_accumulator(StateInfo* state);
-#endif
-
-#if defined(USE_PIECE_VALUE) || (defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(USE_EVAL_LIST)))
-    void release_classic_eval_state_slots();
-    void bind_classic_eval_state(StateInfo* state);
-#endif
-
 #if defined(USE_EVAL_LIST)
-    void release_eval_list_sidecar();
-    void bind_eval_list_sidecar();
+    EvaluatorStorage* active_evaluator_storage();
+    const EvaluatorStorage* active_evaluator_storage() const;
 #endif
+    void reset_evaluator_storage();
     void release_evaluator_storage();
     void bind_evaluator_storage();
 
@@ -1255,12 +1277,9 @@ private:
 	// set_max_repetition_ply()で設定される、千日手の最大遡り手数
     static int max_repetition_ply /* = 16 */;
 
-    // Phase C compatibility layer: Position uses a single evaluator storage
-    // object that contains the active sidecars. Ownership can now live
-    // outside Position (for worker/thread scoped storage), with a local
-    // fallback kept for non-search callers.
-    EvaluatorStorage* ownedEvaluatorStorage = nullptr;
-    EvaluatorStorage* evaluatorStorage = nullptr;
+    // Phase C compatibility layer: evaluator storage ownership can now live
+    // outside Position, while non-search callers still get a local fallback.
+    EvaluatorStorageBinding evaluatorStorageBinding{};
 
 #endif
 };

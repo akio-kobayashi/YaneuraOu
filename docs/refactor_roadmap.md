@@ -211,6 +211,14 @@ Current status:
 - Classic evaluator-owned `materialValue`, `EvalSum`, and `DirtyPiece` storage now also move through a `Position`-owned sidecar, leaving `StateInfo` with compatibility pointers instead of inline storage for those active code paths.
 - `EvalList` and the active evaluator sidecars are now grouped under a single `Position::EvaluatorStorage` compatibility object.
 - Worker root positions now bind that compatibility object from `Thread` scope instead of always allocating it inside `Position`, so the first external ownership step is now in place for active search paths.
+- Cleanup of evaluator sidecars now runs through `EvaluatorStorage::reset()`, reducing `Position`'s storage-layout knowledge to binding and fallback-ownership decisions instead of family-by-family teardown code.
+- Slot lookup and slot creation for classic-eval and NNUE sidecars now also live on `EvaluatorStorage`, so `Position` no longer needs to know the linked-list details of active evaluator state families.
+- Storage lifecycle is now split between `reset_evaluator_storage()` and owner release, so `Position::set()` no longer has to save and restore external evaluator-storage bindings just to reinitialize sidecars.
+- The remaining family-specific release helpers have been removed from `Position`, leaving evaluator reset and per-family bind delegation on the unified compatibility object instead of the earlier transitional wrappers.
+- State-level sidecar bind and clone steps are now grouped behind shared `Position` helpers, so `set()`, `do_move()`, and `do_null_move()` no longer duplicate evaluator-storage wiring logic.
+- State-level sidecar bind and clone ownership now lives on `EvaluatorStorage` itself, leaving `Position` to select the active storage owner and forward setup/move/null-move transitions.
+- `Position` now uses an `active_evaluator_storage()` seam for eval-list access and state-transition forwarding, further reducing the remaining wrapper logic around the unified evaluator-storage object.
+- Ownership policy for local-versus-external evaluator storage is now grouped behind `EvaluatorStorageBinding`, so `Position` no longer open-codes the two-pointer owner dance directly.
 - The build target mismatch that previously mixed `normal` and `tournament` object files is also fixed by splitting object directories per target, so clean tournament rebuilds and short USI search runs now succeed again.
 
 ### Phase D: Restructure search/eval state

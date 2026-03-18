@@ -419,6 +419,156 @@ Verification note:
 - `make -C source tournament APPLE_CPU=native -j4` succeeds
 - the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, and `quit`
 
+### Slice 17: evaluator-storage cleanup is owned by the compatibility object itself
+
+Implemented in:
+- [`position.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.h)
+- [`position.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.cpp)
+
+Changed seam:
+- `Position::EvaluatorStorage` now exposes `reset()` and owns teardown of NNUE slots, classic-eval slots, and `EvalList` clearing.
+- `Position` now decides only whether storage is externally bound or locally owned, and delegates teardown of active sidecars to the storage object.
+
+Purpose:
+- keep Phase C moving by shrinking `Position`'s direct knowledge of evaluator-storage internals
+- make later movement of the compatibility object into worker or thread context simpler, because cleanup follows the storage object instead of the binder
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, and `quit`
+
+### Slice 18: evaluator-storage owns slot binding for active state families
+
+Implemented in:
+- [`position.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.h)
+- [`position.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.cpp)
+
+Changed seam:
+- `EvaluatorStorage` now owns slot lookup and slot creation for classic-eval state and NNUE accumulators.
+- `Position` delegates `bind_classic_eval_state(...)` and `bind_nnue_accumulator(...)` to the compatibility object after choosing or binding the active storage owner.
+- `EvalList` accessors on `Position` also delegate through `EvaluatorStorage`.
+
+Purpose:
+- continue shrinking `Position`'s knowledge of evaluator-state storage layout during Phase C
+- make the compatibility object closer to a real worker-context owned evaluator bundle instead of a passive bag of pointers
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, and `quit`
+
+### Slice 19: evaluator-storage reset is separated from storage-owner release
+
+Implemented in:
+- [`position.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.h)
+- [`position.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.cpp)
+
+Changed seam:
+- `Position` now has `reset_evaluator_storage()` alongside owner-release logic.
+- `Position::set()` resets active sidecars in place without saving and restoring external evaluator-storage bindings.
+- External bind and detach paths now reuse the same reset-only path before changing owners.
+
+Purpose:
+- further separate storage lifetime policy from sidecar reinitialization during Phase C
+- make external evaluator-storage ownership less fragile by removing ad hoc binding preservation around `Position::set()`
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, and `quit`
+
+### Slice 20: legacy family-specific release helpers are removed from `Position`
+
+Implemented in:
+- [`position.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.h)
+- [`position.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.cpp)
+
+Changed seam:
+- `Position` no longer exposes separate release helpers for `EvalList`, classic-eval slots, or NNUE slots.
+- Active code now relies on `EvaluatorStorage::reset()` for teardown and on the per-family bind delegates already housed on `EvaluatorStorage`.
+
+Purpose:
+- reduce transitional API surface during Phase C
+- make the unified evaluator-storage object the only active storage-management seam instead of carrying both new and old helper families in parallel
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, and `quit`
+
+### Slice 21: state-level evaluator sidecar wiring is grouped behind shared helpers
+
+Implemented in:
+- [`position.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.h)
+- [`position.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.cpp)
+
+Changed seam:
+- `Position::bind_state_evaluator_storage(...)` now handles per-state sidecar rebinding for move/setup paths.
+- `Position::clone_state_evaluator_storage(...)` now handles null-move sidecar cloning for classic-eval and NNUE state families.
+- `set()`, `do_move()`, and `do_null_move()` now reuse those helpers instead of open-coding evaluator-storage wiring.
+
+Purpose:
+- reduce repeated state-transition knowledge during Phase C
+- keep evaluator-storage transition logic in one place so later ownership moves affect fewer call sites
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, and `quit`
+
+### Slice 22: evaluator-storage owns state-level bind and clone operations
+
+Implemented in:
+- [`position.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.h)
+- [`position.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.cpp)
+
+Changed seam:
+- `EvaluatorStorage::bind_state(...)` now owns per-state sidecar rebinding.
+- `EvaluatorStorage::clone_state(...)` now owns null-move sidecar cloning.
+- `Position` no longer exposes per-family bind helpers for classic-eval or NNUE state families; it forwards to the active storage owner.
+
+Purpose:
+- continue Phase C by moving state-transition ownership from `Position` into the evaluator-storage compatibility object
+- reduce the remaining evaluator-state policy embedded in `Position` before later thread-context or worker-context relocation
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, and `quit`
+
+### Slice 23: `Position` forwards through `active_evaluator_storage()`
+
+Implemented in:
+- [`position.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.h)
+- [`position.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.cpp)
+
+Changed seam:
+- `Position` now routes eval-list access and state-transition forwarding through `active_evaluator_storage()`.
+- Transitional `Position` wrapper helpers for state bind/clone and eval-list-sidecar binding are removed.
+- The active storage owner remains the same, but `Position` now carries less evaluator-specific wrapper code.
+
+Purpose:
+- continue Phase C by shrinking `Position` toward an owner-selection seam rather than an evaluator-storage orchestration layer
+- reduce the number of transitional wrapper entry points that must be rewritten again when storage ownership moves further outward
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, and `quit`
+
+### Slice 24: local-versus-external storage policy is grouped behind `EvaluatorStorageBinding`
+
+Implemented in:
+- [`position.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.h)
+- [`position.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.cpp)
+
+Changed seam:
+- `ownedEvaluatorStorage` and `evaluatorStorage` are replaced by `EvaluatorStorageBinding`.
+- Reset, release, local fallback allocation, external bind, and external detach now live on the binding object.
+- `Position` no longer open-codes raw owner-pointer transitions directly.
+
+Purpose:
+- continue Phase C by moving owner policy out of `Position` and into a dedicated compatibility object
+- prepare for later relocation of evaluator storage policy into worker or thread context without keeping pointer choreography spread across `Position`
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, and `quit`
+
 ## Non-Goals For The First Pass
 
 Do not start by:
