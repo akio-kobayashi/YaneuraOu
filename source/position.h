@@ -813,7 +813,9 @@ public:
 #if defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT))
     Eval::EvalSum& eval_sum() { return st->sum; }
     const Eval::EvalSum& eval_sum() const { return st->sum; }
+    Eval::EvalSum& mutable_eval_sum() const { return st->sum; }
     void set_eval_sum(const Eval::EvalSum& value) { st->sum = value; }
+    void invalidate_eval_sum() const { st->sum.p[0][0] = VALUE_NOT_EVALUATED; }
 #endif
 
 	// put_piece()やremove_piece()を用いたときは、最後にupdate_bitboards()を呼び出して

@@ -1657,7 +1657,7 @@ void Position::do_move_impl(Move m, StateInfo& newSt, bool givesCheck, const T* 
 #if defined(USE_CLASSIC_EVAL)
 
 #if defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT)
-    st->sum.p[0][0] = VALUE_NOT_EVALUATED;
+    invalidate_eval_sum();
 #endif
 #if defined(EVAL_NNUE)
     invalidate_nnue_accumulator();
@@ -1743,7 +1743,7 @@ void Position::do_move_impl(Move m, StateInfo& newSt, bool givesCheck, const T* 
 #if defined(USE_CLASSIC_EVAL)
 
 #if defined(USE_EVAL_LIST)
-    auto& dp = st->dirtyPiece;
+    auto& dp = dirty_piece();
 #endif
 #endif
 

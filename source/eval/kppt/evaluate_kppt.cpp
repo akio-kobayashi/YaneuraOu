@@ -925,8 +925,7 @@ namespace Eval {
 	// 評価関数
 	Value evaluate(const Position& pos)
 	{
-		auto st = pos.state();
-		auto &sum = st->sum;
+		auto& sum = pos.mutable_eval_sum();
 
 		// すでに計算済(Null Moveなどで)であるなら、それを返す。
 		if (sum.evaluated())
@@ -977,12 +976,12 @@ namespace Eval {
 
 		ASSERT_LV5(pos.material_value() == Eval::material(pos));
 		// 差分計算と非差分計算との計算結果が合致するかのテスト。(さすがに重いのでコメントアウトしておく)
-		// ASSERT_LV5(Value(st->sum.sum(pos.side_to_move()) / FV_SCALE) == compute_eval(pos));
+		// ASSERT_LV5(Value(pos.eval_sum().sum(pos.side_to_move()) / FV_SCALE) == compute_eval(pos));
 		
 #if 0
-		if (!(Value(st->sum.sum(pos.side_to_move()) / FV_SCALE) == compute_eval(pos)))
+		if (!(Value(pos.eval_sum().sum(pos.side_to_move()) / FV_SCALE) == compute_eval(pos)))
 		{
-			st->sum.p[0][0] = VALUE_NOT_EVALUATED;
+			pos.invalidate_eval_sum();
 			evaluateBody(pos);
 		}
 #endif
