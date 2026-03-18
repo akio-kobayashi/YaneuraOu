@@ -1,6 +1,7 @@
 import argparse
 import json
 from pathlib import Path
+from typing import Optional
 
 
 def load_cshogi():
@@ -44,7 +45,7 @@ def parse_sfen_records(path: Path):
     return records
 
 
-def parse_jsonl_records(path: Path | None):
+def parse_jsonl_records(path: Optional[Path]):
     if path is None:
         return None
 
