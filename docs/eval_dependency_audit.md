@@ -377,6 +377,26 @@ Verification note:
 - the affected release-build translation units compile successfully
 - a full clean link is currently blocked by pre-existing unresolved-symbol issues in the top-level `normal` / `tournament` targets, so full-engine runtime validation remains pending after that separate build issue is addressed
 
+### Slice 15: classic evaluator state moves behind `Position` ownership
+
+Implemented in:
+- [`position.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.h)
+- [`position.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.cpp)
+
+Changed seam:
+- `StateInfo` no longer embeds classic evaluator-owned `materialValue`, `EvalSum`, or `DirtyPiece` storage directly.
+- `StateInfo` now keeps a classic-eval sidecar pointer.
+- `Position` owns and binds classic sidecar slots while preserving existing `material_value(...)`, `eval_sum(...)`, and `dirty_piece(...)` accessors.
+
+Purpose:
+- continue Phase C with the remaining classic evaluator-owned state family after the NNUE accumulator move
+- keep active evaluator, learner, and move-update code on the existing accessor seam while removing inline `StateInfo` ownership
+- preserve null-move classic-eval semantics by cloning the previous sidecar state before continuing with score/cache invalidation
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds after the target object-directory split fix
+- the resulting tournament binary passes `usi`, `isready`, short `go movetime`, and `quit`
+
 ## Non-Goals For The First Pass
 
 Do not start by:

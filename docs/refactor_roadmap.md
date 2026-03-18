@@ -208,7 +208,8 @@ Current status:
 - `StateInfo` now keeps only an NNUE sidecar pointer, while `Position` owns the accumulator slot list and binds fresh storage on `set()`, `do_move()`, and `do_null_move()`.
 - Existing `Position` accumulator accessors remain the compatibility layer, so evaluator and feature-transformer call sites do not depend on the storage move.
 - `do_null_move()` explicitly clones the previous accumulator state before invalidating the score cache so null-move reuse semantics stay unchanged.
-- A full clean link is currently blocked by pre-existing unresolved-symbol issues in the `normal` / `tournament` targets, but the affected Phase C translation units compile successfully under the release configuration.
+- Classic evaluator-owned `materialValue`, `EvalSum`, and `DirtyPiece` storage now also move through a `Position`-owned sidecar, leaving `StateInfo` with compatibility pointers instead of inline storage for those active code paths.
+- The build target mismatch that previously mixed `normal` and `tournament` object files is also fixed by splitting object directories per target, so clean tournament rebuilds and short USI search runs now succeed again.
 
 ### Phase D: Restructure search/eval state
 - Define a search thread context object.

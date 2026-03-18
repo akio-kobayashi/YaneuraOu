@@ -17,6 +17,21 @@
 
 namespace YaneuraOu {
 
+struct ClassicEvalState {
+#if defined(USE_PIECE_VALUE)
+    Value materialValue = VALUE_ZERO;
+#endif
+
+#if defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT))
+    // まだ計算されていなければsum.p[2][0]の値はint_max
+    Eval::EvalSum sum{};
+#endif
+
+#if defined(USE_EVAL_LIST)
+    Eval::DirtyPiece dirtyPiece{};
+#endif
+};
+
 // --------------------
 //     局面の情報
 // --------------------
@@ -179,29 +194,19 @@ struct StateInfo {
 	// --- evaluate
 
 #if defined(USE_PIECE_VALUE)
-        // この局面での評価関数の駒割
-        Value materialValue;
+	// Phase C: classic evaluator state is moved out of StateInfo.
+	// StateInfo keeps only a sidecar pointer while Position owns the slots.
+	struct ClassicEvalState* classicEvalState;
+#elif defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(USE_EVAL_LIST))
+	struct ClassicEvalState* classicEvalState;
 #endif
 
 #if defined(USE_CLASSIC_EVAL)
-
-#if defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT)
-
-	// 評価値。(次の局面で評価値を差分計算するときに用いる)
-	// まだ計算されていなければsum.p[2][0]の値はint_max
-	Eval::EvalSum sum;
-
-#endif
 
 #if defined(EVAL_NNUE)
 	// Phase C: NNUE accumulator storage is moved out of StateInfo.
 	// StateInfo keeps only a sidecar pointer while Position owns the slots.
 	Eval::NNUE::Accumulator* nnueAccumulator;
-#endif
-
-#if defined (USE_EVAL_LIST)
-	// 評価値の差分計算の管理用
-	Eval::DirtyPiece dirtyPiece;
 #endif
 
 #if defined(KEEP_LAST_MOVE)
@@ -823,28 +828,28 @@ public:
 #endif
 
 #if defined(USE_EVAL_LIST)
-    Eval::DirtyPiece& dirty_piece() { return st->dirtyPiece; }
-    const Eval::DirtyPiece& dirty_piece() const { return st->dirtyPiece; }
-    Eval::DirtyPiece& dirty_piece(StateInfo* state) const { return state->dirtyPiece; }
-    const Eval::DirtyPiece& dirty_piece(const StateInfo* state) const { return state->dirtyPiece; }
+    Eval::DirtyPiece& dirty_piece() { return st->classicEvalState->dirtyPiece; }
+    const Eval::DirtyPiece& dirty_piece() const { return st->classicEvalState->dirtyPiece; }
+    Eval::DirtyPiece& dirty_piece(StateInfo* state) const { return state->classicEvalState->dirtyPiece; }
+    const Eval::DirtyPiece& dirty_piece(const StateInfo* state) const { return state->classicEvalState->dirtyPiece; }
 #endif
 
 #if defined(USE_PIECE_VALUE)
-    Value material_value() const { return st->materialValue; }
-    void set_material_value(Value value) { st->materialValue = value; }
-    Value material_value(const StateInfo* state) const { return state->materialValue; }
+    Value material_value() const { return st->classicEvalState->materialValue; }
+    void set_material_value(Value value) { st->classicEvalState->materialValue = value; }
+    Value material_value(const StateInfo* state) const { return state->classicEvalState->materialValue; }
 #endif
 
 #if defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT))
-    Eval::EvalSum& eval_sum() { return st->sum; }
-    const Eval::EvalSum& eval_sum() const { return st->sum; }
-    Eval::EvalSum& mutable_eval_sum() const { return st->sum; }
-    Eval::EvalSum& mutable_eval_sum(StateInfo* state) const { return state->sum; }
-    const Eval::EvalSum& eval_sum(const StateInfo* state) const { return state->sum; }
-    void set_eval_sum(const Eval::EvalSum& value) { st->sum = value; }
-    void set_eval_sum(StateInfo* state, const Eval::EvalSum& value) const { state->sum = value; }
-    void invalidate_eval_sum() const { st->sum.p[0][0] = VALUE_NOT_EVALUATED; }
-    bool eval_sum_evaluated(const StateInfo* state) const { return state->sum.evaluated(); }
+    Eval::EvalSum& eval_sum() { return st->classicEvalState->sum; }
+    const Eval::EvalSum& eval_sum() const { return st->classicEvalState->sum; }
+    Eval::EvalSum& mutable_eval_sum() const { return st->classicEvalState->sum; }
+    Eval::EvalSum& mutable_eval_sum(StateInfo* state) const { return state->classicEvalState->sum; }
+    const Eval::EvalSum& eval_sum(const StateInfo* state) const { return state->classicEvalState->sum; }
+    void set_eval_sum(const Eval::EvalSum& value) { st->classicEvalState->sum = value; }
+    void set_eval_sum(StateInfo* state, const Eval::EvalSum& value) const { state->classicEvalState->sum = value; }
+    void invalidate_eval_sum() const { st->classicEvalState->sum.p[0][0] = VALUE_NOT_EVALUATED; }
+    bool eval_sum_evaluated(const StateInfo* state) const { return state->classicEvalState->sum.evaluated(); }
 #endif
 
 	// put_piece()やremove_piece()を用いたときは、最後にupdate_bitboards()を呼び出して
@@ -1066,6 +1071,14 @@ private:
     };
 #endif
 
+#if defined(USE_PIECE_VALUE) || (defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(USE_EVAL_LIST)))
+    struct ClassicEvalStateSlot {
+        StateInfo*             owner = nullptr;
+        ClassicEvalState       state{};
+        ClassicEvalStateSlot*  next = nullptr;
+    };
+#endif
+
     // Initialization helpers (used while setting up a position)
 	 // 初期化用のヘルパー（局面を設定する際に使用）
 
@@ -1079,6 +1092,11 @@ private:
 #if defined(EVAL_NNUE)
     void release_nnue_accumulator_slots();
     void bind_nnue_accumulator(StateInfo* state);
+#endif
+
+#if defined(USE_PIECE_VALUE) || (defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(USE_EVAL_LIST)))
+    void release_classic_eval_state_slots();
+    void bind_classic_eval_state(StateInfo* state);
 #endif
 
 #if STOCKFISH
@@ -1216,6 +1234,12 @@ private:
     // Phase C compatibility layer: Position owns NNUE sidecar storage while
     // StateInfo holds only pointers.
     NnueAccumulatorSlot* nnueAccumulatorSlots = nullptr;
+#endif
+
+#if defined(USE_PIECE_VALUE) || (defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(USE_EVAL_LIST)))
+    // Phase C compatibility layer: Position owns classic evaluator state
+    // sidecars while StateInfo holds only pointers.
+    ClassicEvalStateSlot* classicEvalStateSlots = nullptr;
 #endif
 
 #endif

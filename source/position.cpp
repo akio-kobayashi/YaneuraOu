@@ -26,10 +26,44 @@ using namespace Eval;
 int Position::max_repetition_ply = 16;
 
 Position::~Position() {
+#if defined(USE_PIECE_VALUE) || (defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(USE_EVAL_LIST)))
+    release_classic_eval_state_slots();
+#endif
 #if defined(EVAL_NNUE)
     release_nnue_accumulator_slots();
 #endif
 }
+
+#if defined(USE_PIECE_VALUE) || (defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(USE_EVAL_LIST)))
+void Position::release_classic_eval_state_slots() {
+    while (classicEvalStateSlots)
+    {
+        auto* next = classicEvalStateSlots->next;
+        delete classicEvalStateSlots;
+        classicEvalStateSlots = next;
+    }
+}
+
+void Position::bind_classic_eval_state(StateInfo* state) {
+    ASSERT_LV3(state);
+
+    if (state->classicEvalState)
+        return;
+
+    for (auto* slot = classicEvalStateSlots; slot; slot = slot->next)
+        if (slot->owner == state)
+        {
+            state->classicEvalState = &slot->state;
+            return;
+        }
+
+    auto* slot  = new ClassicEvalStateSlot();
+    slot->owner = state;
+    slot->next  = classicEvalStateSlots;
+    classicEvalStateSlots = slot;
+    state->classicEvalState = &slot->state;
+}
+#endif
 
 #if defined(EVAL_NNUE)
 void Position::release_nnue_accumulator_slots() {
@@ -453,6 +487,9 @@ void Position::set_state() const {
 
 // sfen文字列で盤面を設定する
 Position& Position::set(const std::string& sfen, StateInfo* si) {
+#if defined(USE_PIECE_VALUE) || (defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(USE_EVAL_LIST)))
+    release_classic_eval_state_slots();
+#endif
 #if defined(EVAL_NNUE)
     release_nnue_accumulator_slots();
 #endif
@@ -475,6 +512,9 @@ Position& Position::set(const std::string& sfen, StateInfo* si) {
 
     st = si;
 
+#if defined(USE_PIECE_VALUE) || (defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(USE_EVAL_LIST)))
+    bind_classic_eval_state(st);
+#endif
 #if defined(EVAL_NNUE)
     bind_nnue_accumulator(st);
 #endif
@@ -1673,6 +1713,10 @@ void Position::do_move_impl(Move m, StateInfo& newSt, bool givesCheck, const T* 
     newSt.previous = st;
     st             = &newSt;
 
+#if defined(USE_PIECE_VALUE) || (defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(USE_EVAL_LIST)))
+    st->classicEvalState = nullptr;
+    bind_classic_eval_state(st);
+#endif
 #if defined(EVAL_NNUE)
     st->nnueAccumulator = nullptr;
     bind_nnue_accumulator(st);
@@ -2070,7 +2114,7 @@ void Position::do_move_impl(Move m, StateInfo& newSt, bool givesCheck, const T* 
 
 #if defined(USE_PIECE_VALUE)
     set_material_value(
-      (Value) (st->previous->materialValue + (Us == BLACK ? materialDiff : -materialDiff)));
+      (Value) (material_value(st->previous) + (Us == BLACK ? materialDiff : -materialDiff)));
     //ASSERT_LV5(st->materialValue == Eval::material(*this));
 #endif
 
@@ -2416,6 +2460,11 @@ void Position::do_null_move(StateInfo& newSt, const T& tt) {
 	newSt.previous = previousState;
     st             = &newSt;
 
+#if defined(USE_PIECE_VALUE) || (defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(USE_EVAL_LIST)))
+    st->classicEvalState = nullptr;
+    bind_classic_eval_state(st);
+    *st->classicEvalState = *previousState->classicEvalState;
+#endif
 #if defined(EVAL_NNUE)
     st->nnueAccumulator = nullptr;
     bind_nnue_accumulator(st);
