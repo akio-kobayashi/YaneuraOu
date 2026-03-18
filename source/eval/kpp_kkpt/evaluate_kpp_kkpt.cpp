@@ -328,13 +328,13 @@ namespace Eval {
 		const auto* ppkppb = kpp[sq_bk];
 		const auto* ppkppw = kpp[Inv(sq_wk)];
 
-		auto& pos_ = *const_cast<Position*>(&pos);
-		const int length = pos_.eval_list()->length();
+		const auto* eval_list = pos.eval_list();
+		const int length = eval_list->length();
 
 #if !defined (USE_EVAL_MAKE_LIST_FUNCTION)
 
-		auto list_fb = pos_.eval_list()->piece_list_fb();
-		auto list_fw = pos_.eval_list()->piece_list_fw();
+		auto list_fb = eval_list->piece_list_fb();
+		auto list_fw = eval_list->piece_list_fw();
 
 #else
 		// -----------------------------------
@@ -345,8 +345,8 @@ namespace Eval {
 		// バッファを確保してコピー
 		BonaPiece list_fb[40];
 		BonaPiece list_fw[40];
-		memcpy(list_fb, pos_.eval_list()->piece_list_fb(), sizeof(BonaPiece) * 40);
-		memcpy(list_fw, pos_.eval_list()->piece_list_fw(), sizeof(BonaPiece) * 40);
+		memcpy(list_fb, eval_list->piece_list_fb(), sizeof(BonaPiece) * 40);
+		memcpy(list_fw, eval_list->piece_list_fw(), sizeof(BonaPiece) * 40);
 
 		// ユーザーは、この関数でBonaPiece番号の自由な組み換えを行なうものとする。
 		make_list_function(pos, list_fb, list_fw);
@@ -1007,12 +1007,12 @@ namespace Eval {
 		const auto* ppkppb = kpp[sq_bk];
 		const auto* ppkppw = kpp[Inv(sq_wk)];
 
-		auto& pos_ = *const_cast<Position*>(&pos);
+		const auto* eval_list = pos.eval_list();
 
 #if !defined (USE_EVAL_MAKE_LIST_FUNCTION)
 
-		auto list_fb = pos_.eval_list()->piece_list_fb();
-		auto list_fw = pos_.eval_list()->piece_list_fw();
+		auto list_fb = eval_list->piece_list_fb();
+		auto list_fw = eval_list->piece_list_fw();
 
 #else
 		// -----------------------------------
@@ -1023,8 +1023,8 @@ namespace Eval {
 		// バッファを確保してコピー
 		BonaPiece list_fb[40];
 		BonaPiece list_fw[40];
-		memcpy(list_fb, pos_.eval_list()->piece_list_fb(), sizeof(BonaPiece) * 40);
-		memcpy(list_fw, pos_.eval_list()->piece_list_fw(), sizeof(BonaPiece) * 40);
+		memcpy(list_fb, eval_list->piece_list_fb(), sizeof(BonaPiece) * 40);
+		memcpy(list_fw, eval_list->piece_list_fw(), sizeof(BonaPiece) * 40);
 
 		// ユーザーは、この関数でBonaPiece番号の自由な組み換えを行なうものとする。
 		make_list_function(pos, list_fb, list_fw);
@@ -1033,8 +1033,8 @@ namespace Eval {
 		for (PieceNumber i = PIECE_NUMBER_ZERO; i < PIECE_NUMBER_NB; ++i)
 		{
 			// 組み替えて異なる番号になったものだけ出力。
-			auto fb = pos_.eval_list()->piece_list_fb()[i];
-			auto fw = pos_.eval_list()->piece_list_fw()[i];
+			auto fb = eval_list->piece_list_fb()[i];
+			auto fw = eval_list->piece_list_fw()[i];
 			auto fb_new = list_fb[i];
 			auto fw_new = list_fw[i];
 

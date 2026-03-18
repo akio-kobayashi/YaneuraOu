@@ -453,7 +453,8 @@ Position& Position::set(const std::string& sfen, StateInfo* si) {
 
 #if defined(USE_EVAL_LIST)
     // evalListのclear。上でmemsetでゼロクリアしたときにクリアされているが…。
-    evalList.clear();
+    auto& eval_list = *mutable_eval_list();
+    eval_list.clear();
 
     // PieceListを更新する上で、どの駒がどこにあるかを設定しなければならないが、
     // それぞれの駒をどこまで使ったかのカウンター
@@ -497,7 +498,7 @@ Position& Position::set(const std::string& sfen, StateInfo* si) {
                                      (idx == W_KING) ? PIECE_NUMBER_WKING
                                                      :                           // 後手玉
                                      piece_no_count[raw_type_of(Piece(idx))]++;  // それ以外
-            evalList.put_piece(piece_no, sq, pc);  // sqの升にpcの駒を配置する
+            eval_list.put_piece(piece_no, sq, pc);  // sqの升にpcの駒を配置する
 #endif
 
             // 1升進める
@@ -551,7 +552,7 @@ Position& Position::set(const std::string& sfen, StateInfo* si) {
 #if defined(USE_EVAL_LIST)
                 PieceNumber piece_no = piece_no_count[rpc]++;
                 ASSERT_LV1(is_ok(piece_no));
-                evalList.put_piece(piece_no, color_of(pc), rpc, i);
+                eval_list.put_piece(piece_no, color_of(pc), rpc, i);
 #endif
             }
             ct = 0;
@@ -1743,6 +1744,7 @@ void Position::do_move_impl(Move m, StateInfo& newSt, bool givesCheck, const T* 
 #if defined(USE_CLASSIC_EVAL)
 
 #if defined(USE_EVAL_LIST)
+    auto& eval_list = *mutable_eval_list();
     auto& dp = dirty_piece();
 #endif
 #endif
@@ -1787,9 +1789,9 @@ void Position::do_move_impl(Move m, StateInfo& newSt, bool givesCheck, const T* 
         // KPPの差分計算のために移動した駒をStateInfoに記録しておく。
         dp.dirty_num                  = 1;  // 動いた駒は1個
         dp.pieceNo[0]                 = piece_no;
-        dp.changed_piece[0].old_piece = evalList.bona_piece(piece_no);
-        evalList.put_piece(piece_no, to, pc);
-        dp.changed_piece[0].new_piece = evalList.bona_piece(piece_no);
+        dp.changed_piece[0].old_piece = eval_list.bona_piece(piece_no);
+        eval_list.put_piece(piece_no, to, pc);
+        dp.changed_piece[0].new_piece = eval_list.bona_piece(piece_no);
 #endif
 
         // ⚠ piece_no_of()のときに、いまの手駒の枚数を参照するので↑のあとで更新する必要がある。
@@ -1868,9 +1870,9 @@ void Position::do_move_impl(Move m, StateInfo& newSt, bool givesCheck, const T* 
 			ASSERT_LV3(is_ok(piece_no));
 			dp.dirty_num                  = 2;  // 動いた駒は2個
 			dp.pieceNo[1]                 = piece_no;
-			dp.changed_piece[1].old_piece = evalList.bona_piece(piece_no);
-			evalList.put_piece(piece_no, Us, pr, hand_count(hand[Us], pr));
-			dp.changed_piece[1].new_piece = evalList.bona_piece(piece_no);
+			dp.changed_piece[1].old_piece = eval_list.bona_piece(piece_no);
+			eval_list.put_piece(piece_no, Us, pr, hand_count(hand[Us], pr));
+			dp.changed_piece[1].new_piece = eval_list.bona_piece(piece_no);
 #endif
 
             // 駒取りなら現在の手番側の駒が増える。
@@ -1933,7 +1935,7 @@ void Position::do_move_impl(Move m, StateInfo& newSt, bool givesCheck, const T* 
         // 移動元にあった駒のpiece_noを得る
         PieceNumber piece_no2         = piece_no_of(from);
         dp.pieceNo[0]                 = piece_no2;
-        dp.changed_piece[0].old_piece = evalList.bona_piece(piece_no2);
+        dp.changed_piece[0].old_piece = eval_list.bona_piece(piece_no2);
 #endif
 
         // 移動元の升からの駒の除去
@@ -1945,8 +1947,8 @@ void Position::do_move_impl(Move m, StateInfo& newSt, bool givesCheck, const T* 
         put_piece_for_partial_key(st, moved_after_pc, to);
 
 #if defined(USE_EVAL_LIST)
-        evalList.put_piece(piece_no2, to, moved_after_pc);
-        dp.changed_piece[0].new_piece = evalList.bona_piece(piece_no2);
+        eval_list.put_piece(piece_no2, to, moved_after_pc);
+        dp.changed_piece[0].new_piece = eval_list.bona_piece(piece_no2);
 #endif
 
         // 王を移動させる手であるなら、kingSquareを更新しておく。
@@ -2231,7 +2233,8 @@ void Position::undo_move_impl(Move m) {
         PieceType pt = raw_type_of(moved_after_pc);
 
 #if defined(USE_EVAL_LIST)
-        evalList.put_piece(piece_no, Us, pt, hand_count(hand[Us], pt));
+        auto& eval_list = *mutable_eval_list();
+        eval_list.put_piece(piece_no, Us, pt, hand_count(hand[Us], pt));
 #endif
 		// 手駒が増える
         put_hand_piece(Us, pt);
@@ -2267,11 +2270,12 @@ void Position::undo_move_impl(Move m) {
             put_piece(moved_pc, from);
 
 #if defined(USE_EVAL_LIST)
+            auto& eval_list = *mutable_eval_list();
             PieceNumber piece_no2 =
               piece_no_of(Us, raw_type_of(to_pc));  // 捕っていた駒(手駒にある)のpiece_no
             ASSERT_LV3(is_ok(piece_no2));
 
-            evalList.put_piece(piece_no2, to, to_pc);
+            eval_list.put_piece(piece_no2, to, to_pc);
 
             // 手駒から減らす
             remove_hand_piece(Us, raw_type_of(to_pc));
@@ -2279,7 +2283,7 @@ void Position::undo_move_impl(Move m) {
             // 成りの指し手だったなら非成りの駒がfromの場所に戻る。さもなくばそのまま戻る。
             // moved_pcが玉であることはあるが、いまkingSquareを更新してしまうと
             // rewind_by_capturing_piece()でその位置を用いているのでまずい。(かも)
-            evalList.put_piece(piece_no, from, moved_pc);
+            eval_list.put_piece(piece_no, from, moved_pc);
 #else
             // 手駒から減らす
             remove_hand_piece(Us, raw_type_of(to_pc));
@@ -2297,8 +2301,9 @@ void Position::undo_move_impl(Move m) {
             put_piece(moved_pc, from);
 
 #if defined(USE_EVAL_LIST)
+            auto& eval_list = *mutable_eval_list();
             // 成りの指し手だったなら非成りの駒がfromの場所に戻る。さもなくばそのまま戻る。
-            evalList.put_piece(piece_no, from, moved_pc);
+            eval_list.put_piece(piece_no, from, moved_pc);
 #endif
 
 #if defined(LONG_EFFECT_LIBRARY)

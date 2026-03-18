@@ -684,6 +684,12 @@ Value search_outcome_delta_from_normalized_static_eval(const Value searchOutcome
     return searchOutcome - normalizedStaticEval;
 }
 
+int quiet_history_bonus_from_normalized_static_eval_pair(const Value previousPlyStaticEval,
+                                                         const Value currentNormalizedStaticEval) {
+    return std::clamp(-10 * int(previousPlyStaticEval + currentNormalizedStaticEval), -2023, 1563)
+           + 583;
+}
+
 bool is_large_fail_low_against_normalized_static_eval(const bool  inCheck,
                                                       const Value searchOutcome,
                                                       const Value normalizedStaticEval) {
@@ -735,6 +741,20 @@ Value qsearch_capture_futility_value_from_normalized_static_eval(
     return futilityBase + capturedPieceValue;
 }
 
+bool should_reduce_depth_after_prior_reduction(const Depth priorReduction,
+                                               const Depth depth,
+                                               const Value currentNormalizedStaticEval,
+                                               const Value previousPlyStaticEval) {
+    return priorReduction >= 2 && depth >= 2
+           && currentNormalizedStaticEval + previousPlyStaticEval > 173;
+}
+
+bool improving_from_normalized_static_eval_vs_beta(const bool  improving,
+                                                   const Value currentNormalizedStaticEval,
+                                                   const Value beta) {
+    return improving || currentNormalizedStaticEval >= beta;
+}
+
 Value value_to_tt(Value v, int ply);
 Value value_from_tt(Value v, int ply /*, int r50c */);
 
@@ -756,6 +776,69 @@ bool tt_bound_allows_search_score_cutoff(const Value ttSearchScore,
                                          const Bound ttBound) {
     return is_valid(ttSearchScore)
            && (ttBound & (ttSearchScore >= beta ? BOUND_LOWER : BOUND_UPPER));
+}
+
+bool tt_search_score_is_at_least_beta(const Value ttSearchScore, const Value beta) {
+    return is_valid(ttSearchScore) && ttSearchScore >= beta;
+}
+
+bool tt_search_score_is_below_threshold(const Value ttSearchScore, const Value threshold) {
+    return is_valid(ttSearchScore) && ttSearchScore < threshold;
+}
+
+bool tt_search_score_supports_cutnode_assumption(const Value ttSearchScore,
+                                                 const Value beta,
+                                                 const bool  cutNode,
+                                                 const Depth depth) {
+    return cutNode == (ttSearchScore >= beta) || depth > 5;
+}
+
+bool tt_search_score_supports_small_probcut(const Value ttSearchScore,
+                                            const Bound ttBound,
+                                            const Depth ttDepth,
+                                            const Depth depth,
+                                            const Value probCutBeta,
+                                            const Value beta) {
+    return (ttBound & BOUND_LOWER) && ttDepth >= depth - 4
+           && tt_search_score_is_at_least_beta(ttSearchScore, probCutBeta)
+           && !is_decisive(beta) && !is_decisive(ttSearchScore);
+}
+
+bool tt_search_score_supports_singular_extension(const Value ttSearchScore,
+                                                 const Bound ttBound,
+                                                 const Depth ttDepth,
+                                                 const Depth depth) {
+    return is_valid(ttSearchScore) && !is_decisive(ttSearchScore) && (ttBound & BOUND_LOWER)
+           && ttDepth >= depth - 3;
+}
+
+bool tt_search_score_can_seed_static_eval_estimate(const Value ttSearchScore) {
+    return !is_decisive(ttSearchScore);
+}
+
+Value singular_beta_from_tt_search_score(const Value ttSearchScore,
+                                         const bool  isTtPvNonPvNode,
+                                         const Depth depth) {
+    return ttSearchScore - (56 + 81 * isTtPvNonPvNode) * depth / 60;
+}
+
+Depth probcut_depth_from_normalized_static_eval(const Depth depth,
+                                                const Value currentNormalizedStaticEval,
+                                                const Value beta) {
+    return std::clamp(depth - 5 - (currentNormalizedStaticEval - beta) / 306, 0, depth);
+}
+
+int reduction_adjustment_from_tt_search_score(const bool  ttPv,
+                                              const bool  pvNode,
+                                              const Value ttSearchScore,
+                                              const Value alpha,
+                                              const Depth ttDepth,
+                                              const Depth depth,
+                                              const bool  cutNode) {
+    return ttPv
+             ? 2618 + pvNode * 991 + tt_search_score_is_at_least_beta(ttSearchScore, alpha) * 903
+                 + (ttDepth >= depth) * (978 + cutNode * 1051)
+             : 0;
 }
 
 Value value_draw(size_t nodes);
@@ -2600,10 +2683,10 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
 
 	if (!PvNode
 		&& !excludedMove
-		&& ttData.depth > depth - (ttData.value <= beta) // 置換表に登録されている探索深さのほうが深くて
-							        // !ttHitの場合やprobe()でのアクセス競合時に発生する可能性がありうる。
+		&& ttData.depth > depth - tt_search_score_is_below_threshold(ttData.value, beta) // 置換表に登録されている探索深さのほうが深くて
+								        // !ttHitの場合やprobe()でのアクセス競合時に発生する可能性がありうる。
         && tt_bound_allows_search_score_cutoff(ttData.value, beta, ttData.bound)
-        && (cutNode == (ttData.value >= beta) || depth > 5)
+        && tt_search_score_supports_cutnode_assumption(ttData.value, beta, cutNode, depth)
 #if STOCKFISH
 		// avoid a TT cutoff if the rule50 count is high and the TT move is zeroing
         && (depth > 8 || ttData.move == Move::none() || pos.rule50_count() < 80
@@ -2625,7 +2708,7 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
         // If ttMove is quiet, update move sorting heuristics on TT hit
         // ttMoveがquietの指し手である場合、置換表ヒット時に指し手のソート用ヒューリスティクスを更新します。
 
-        if (ttData.move && ttData.value >= beta)
+	        if (ttData.move && tt_search_score_is_at_least_beta(ttData.value, beta))
         {
 			/*
 				📝 備考
@@ -3039,7 +3122,8 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
 
     if (((ss - 1)->currentMove).is_ok() && !(ss - 1)->inCheck && !priorCapture)
     {
-        int bonus = std::clamp(-10 * int((ss - 1)->staticEval + ss->staticEval), -2023, 1563) + 583;
+        int bonus = quiet_history_bonus_from_normalized_static_eval_pair(
+          (ss - 1)->staticEval, ss->staticEval);
         mainHistory[~us][((ss - 1)->currentMove).from_to()] << bonus * 944 / 1024;
 
 		// TODO : これ必要なのか？あとで検証する。
@@ -3087,7 +3171,8 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
 
     if (priorReduction >= 3 && !opponentWorsening)
         depth++;
-    if (priorReduction >= 2 && depth >= 2 && ss->staticEval + (ss - 1)->staticEval > 173)
+    if (should_reduce_depth_after_prior_reduction(
+          priorReduction, depth, ss->staticEval, (ss - 1)->staticEval))
         depth--;
 
 	// -----------------------
@@ -3210,7 +3295,7 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
 
 	// ここでimproving計算しなおす。
 
-    improving |= ss->staticEval >= beta;
+    improving = improving_from_normalized_static_eval_vs_beta(improving, ss->staticEval, beta);
 
 	// -----------------------
     // Step 10. Internal iterative reductions
@@ -3267,7 +3352,7 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
         // If value from transposition table is lower than probCutBeta, don't attempt
         // probCut there
         // 置換表から得た値が probCutBeta より低い場合は、そこで probCut を試みない
-        && !(is_valid(ttData.value) && ttData.value < probCutBeta))
+        && !tt_search_score_is_below_threshold(ttData.value, probCutBeta))
     {
         ASSERT_LV3(probCutBeta < VALUE_INFINITE && probCutBeta > beta);
 
@@ -3278,7 +3363,7 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
                       search_options.generate_all_legal_moves);
 #endif
 
-		Depth      probCutDepth = std::clamp(depth - 5 - (ss->staticEval - beta) / 306, 0, depth);
+		Depth      probCutDepth = probcut_depth_from_normalized_static_eval(depth, ss->staticEval, beta);
 
 		// 💡 試行回数は2回(cutNodeなら4回)までとする。(よさげな指し手を3つ試して駄目なら駄目という扱い)
         //     cf. Do move-count pruning in probcut : https://github.com/official-stockfish/Stockfish/commit/b87308692a434d6725da72bbbb38a38d3cac1d5f
@@ -3339,8 +3424,8 @@ moves_loop:  // When in check, search starts here
     // -----------------------
 
     probCutBeta = beta + 418;
-    if ((ttData.bound & BOUND_LOWER) && ttData.depth >= depth - 4 && ttData.value >= probCutBeta
-        && !is_decisive(beta) && is_valid(ttData.value) && !is_decisive(ttData.value))
+    if (tt_search_score_supports_small_probcut(
+          ttData.value, ttData.bound, ttData.depth, depth, probCutBeta, beta))
         return probCutBeta;
 
 	// -----------------------
@@ -3648,8 +3733,8 @@ moves_loop:  // When in check, search starts here
 
 		// singular延長をするnodeであるか。
 		if (!rootNode && move == ttData.move && !excludedMove && depth >= 6 + ss->ttPv
-            && is_valid(ttData.value) && !is_decisive(ttData.value) && (ttData.bound & BOUND_LOWER)
-            && ttData.depth >= depth - 3)
+            && tt_search_score_supports_singular_extension(
+              ttData.value, ttData.bound, ttData.depth, depth))
         {
             /*
 				💡 このnodeについてある程度調べたことが置換表によって証明されている。(ttMove == moveなのでttMove != Move::none())
@@ -3659,7 +3744,8 @@ moves_loop:  // When in check, search starts here
 
             //  📍 このmargin値は評価関数の性質に合わせて調整されるべき。
 
-            Value singularBeta  = ttData.value - (56 + 81 * (ss->ttPv && !PvNode)) * depth / 60;
+            Value singularBeta  = singular_beta_from_tt_search_score(
+              ttData.value, ss->ttPv && !PvNode, depth);
             Depth singularDepth = newDepth / 2;
 
             // 💡 move(ttMove)の指し手を以下のsearch()での探索から除外。
@@ -3741,7 +3827,7 @@ moves_loop:  // When in check, search starts here
             // If the ttMove is assumed to fail high over current beta
             // ttMove が現在の beta を超えて fail high すると想定される場合
 
-            else if (ttData.value >= beta)
+            else if (tt_search_score_is_at_least_beta(ttData.value, beta))
                 extension = -3;
 
             // If we are on a cutNode but the ttMove is not assumed to fail high
@@ -3779,9 +3865,8 @@ moves_loop:  // When in check, search starts here
         // Decrease reduction for PvNodes (*Scaler)
         // Pv Nodesに対してreductionを減らす(*Scaler)
 
-		if (ss->ttPv)
-            r -= 2618 + PvNode * 991 + (ttData.value > alpha) * 903
-               + (ttData.depth >= depth) * (978 + cutNode * 1051);
+		r -= reduction_adjustment_from_tt_search_score(
+          ss->ttPv, PvNode, ttData.value, alpha, ttData.depth, depth, cutNode);
 
         // These reduction adjustments have no proven non-linear scaling
         // これらの減少量調整には、非線形スケーリングの有効性が証明されていません
@@ -4636,7 +4721,7 @@ Value Search::YaneuraOuWorker::qsearch(Position& pos, Stack* ss, Value alpha, Va
 				    そのための条件。
 			*/
 
-            if (!is_decisive(ttData.value))
+            if (tt_search_score_can_seed_static_eval_estimate(ttData.value))
                 bestValue = merge_tt_into_static_eval_estimate(bestValue, ttData.value, ttData.bound);
         }
         else

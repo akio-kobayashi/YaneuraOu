@@ -144,12 +144,12 @@ namespace Eval {
 		Square sq_bk = pos.square<KING>(BLACK);
 		Square sq_wk = pos.square<KING>(WHITE);
 
-		auto& pos_ = *const_cast<Position*>(&pos);
+		const auto* eval_list = pos.eval_list();
 
 #if !defined (USE_EVAL_MAKE_LIST_FUNCTION)
 
-		auto list_fb = pos_.eval_list()->piece_list_fb();
-		auto list_fw = pos_.eval_list()->piece_list_fw();
+		auto list_fb = eval_list->piece_list_fb();
+		auto list_fw = eval_list->piece_list_fw();
 
 #else
 		// -----------------------------------
@@ -160,8 +160,8 @@ namespace Eval {
 		// バッファを確保してコピー
 		BonaPiece list_fb[40];
 		BonaPiece list_fw[40];
-		memcpy(list_fb, pos_.eval_list()->piece_list_fb(), sizeof(BonaPiece) * 40);
-		memcpy(list_fw, pos_.eval_list()->piece_list_fw(), sizeof(BonaPiece) * 40);
+		memcpy(list_fb, eval_list->piece_list_fb(), sizeof(BonaPiece) * 40);
+		memcpy(list_fw, eval_list->piece_list_fw(), sizeof(BonaPiece) * 40);
 
 		// ユーザーは、この関数でBonaPiece番号の自由な組み換えを行なうものとする。
 		make_list_function(pos, list_fb, list_fw);

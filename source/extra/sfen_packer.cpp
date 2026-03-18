@@ -462,7 +462,8 @@ Tools::Result Position::set_from_packed_sfen(const PackedSfen& sfen , StateInfo 
 	#if defined(USE_EVAL_LIST)
 
 	// evalListのclear。上でmemsetでゼロクリアしたときにクリアされているが…。
-	evalList.clear();
+	auto& eval_list = *mutable_eval_list();
+	eval_list.clear();
 
 	// PieceListを更新する上で、どの駒がどこにあるかを設定しなければならないが、
 	// それぞれの駒をどこまで使ったかのカウンター
@@ -516,7 +517,7 @@ Tools::Result Position::set_from_packed_sfen(const PackedSfen& sfen , StateInfo 
 			(pc == W_KING) ? PIECE_NUMBER_WKING : // 後手玉
 			piece_no_count[raw_type_of(pc)]++; // それ以外
 
-		evalList.put_piece(piece_no, sq, pc); // sqの升にpcの駒を配置する
+		eval_list.put_piece(piece_no, sq, pc); // sqの升にpcの駒を配置する
 	#endif
 
 		//cout << sq << ' ' << board[sq] << ' ' << stream.get_cursor() << endl;
@@ -554,7 +555,7 @@ Tools::Result Position::set_from_packed_sfen(const PackedSfen& sfen , StateInfo 
 
 		PieceNumber piece_no = piece_no_count[rpc]++;
 		ASSERT_LV1(is_ok(piece_no));
-		evalList.put_piece(piece_no, color_of(pc), rpc, i++);
+		eval_list.put_piece(piece_no, color_of(pc), rpc, i++);
 	#endif
 	}
 

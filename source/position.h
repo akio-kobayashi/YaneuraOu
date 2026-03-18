@@ -690,7 +690,9 @@ public:
 
 #if defined(USE_EVAL_LIST)
 	// 評価関数で使うための、どの駒番号の駒がどこにあるかなどの情報。
+	Eval::EvalList* eval_list() { return &evalList; }
 	const Eval::EvalList* eval_list() const { return &evalList; }
+	Eval::EvalList* mutable_eval_list() { return &evalList; }
 #endif
 
 #if defined (USE_SEE)

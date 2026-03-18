@@ -189,6 +189,7 @@ Rationale:
 - Add comments documenting ownership and invalidation rules.
 
 Current status:
+- Phase A is complete on this branch: active search-path score semantics now flow through named helpers, and remaining raw `ttData.value` comparisons are limited to disabled code or explanatory comments.
 - Initial transitional wrapper introduced on the search side as `Search::EvaluationContext`.
 - This keeps existing behavior while creating a seam for later evaluator-state ownership changes.
 - Classic NNUE accumulator access is now routed through `Position` helper methods instead of open-coded `state()->accumulator` references.

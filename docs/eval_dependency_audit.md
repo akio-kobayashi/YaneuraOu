@@ -334,6 +334,29 @@ Purpose:
 - finish the access-boundary step for classic-eval state without changing storage ownership yet
 - leave `config.h` comments as the only remaining `state()->dirtyPiece` textual reference in the tree
 
+### Slice 13: remaining TT search-score predicates use named helpers
+
+Implemented in:
+- [`yaneuraou-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.cpp)
+
+Added helpers:
+- `tt_search_score_is_at_least_beta(...)`
+- `tt_search_score_is_below_threshold(...)`
+- `tt_search_score_supports_cutnode_assumption(...)`
+- `tt_search_score_supports_small_probcut(...)`
+- `tt_search_score_supports_singular_extension(...)`
+- `tt_search_score_can_seed_static_eval_estimate(...)`
+- `singular_beta_from_tt_search_score(...)`
+- `reduction_adjustment_from_tt_search_score(...)`
+
+Purpose:
+- finish the remaining active TT search-score threshold checks that were still expressed as raw `ttData.value` predicates inside main search
+- leave TT decode, return, and writeback operations as the intentional low-level primitives for the search-score domain
+
+Phase A completion note:
+- With Slice 13, the active search-path score semantics work is complete under the roadmap definition.
+- Remaining direct `ttData.value` comparisons in this file are confined to disabled `#if 0` code or explanatory comments.
+
 ## Non-Goals For The First Pass
 
 Do not start by:
