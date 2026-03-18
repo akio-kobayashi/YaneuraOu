@@ -293,11 +293,7 @@ namespace {
 			std::uint32_t fc_hash;
 			stream.read(reinterpret_cast<char*>(&fc_hash), sizeof(fc_hash));
 
-			if (!network->fc_0.ReadParameters(stream).is_ok()) return Tools::ResultCode::FileReadError;
-			
-			// L2, Output層 (共通) の読み込み
-			if (!network->fc_1.ReadParameters(stream).is_ok()) return Tools::ResultCode::FileReadError;
-			if (!network->fc_2.ReadParameters(stream).is_ok()) return Tools::ResultCode::FileReadError;
+			if (!network->ReadParameters(stream).is_ok()) return Tools::ResultCode::FileReadError;
 
     		if (stream && stream.peek() == std::ios::traits_type::eof())
     			return Tools::ResultCode::Ok;
@@ -314,10 +310,7 @@ namespace {
 		std::uint32_t fc_hash = 0; // 適宜計算
 		stream.write(reinterpret_cast<char*>(&fc_hash), sizeof(fc_hash));
 
-		if (!network->fc_0.WriteParameters(stream)) return false;
-
-		if (!network->fc_1.WriteParameters(stream)) return false;
-		if (!network->fc_2.WriteParameters(stream)) return false;
+		if (!network->WriteParameters(stream)) return false;
 
         return !stream.fail();
     }
@@ -340,35 +333,8 @@ namespace {
         alignas(kCacheLineSize) char buffer[Network::kBufferSize];
 
         const auto output = network->Propagate(transformed_features, buffer);
-
-        // 仕様書 4項: FinalScore = NNUE_Output + (SideToMove_PSQT - Opponent_PSQT)
-        // 今回の指示では PSQT 重みは別途読み込むか、既存のものを利用する。
-        // ここでは NNUE 出力を基本とし、PSQT パスを合算する。
-        Value score = (Value)output[0];
-
-        // TODO: PSQTパスの重みが読み込めている場合はここで加算する。
-        // 現状はNNUE出力(FV_SCALE)を返す。
-        return score;
-    }
-
-        // VALUE_MAX_EVALより大きな値が返ってくるとaspiration searchがfail highして
-        // 探索が終わらなくなるのでVALUE_MAX_EVAL以下であることを保証すべき。
-
-        // この現象が起きても、対局時に秒固定などだとそこで探索が打ち切られるので、
-        // 1つ前のiterationのときの最善手がbestmoveとして指されるので見かけ上、
-        // 問題ない。このVALUE_MAX_EVALが返ってくるような状況は、ほぼ詰みの局面であり、
-        // そのような詰みの局面が出現するのは終盤で形勢に大差がついていることが多いので
-        // 勝敗にはあまり影響しない。
-
-        // しかし、教師生成時などdepth固定で探索するときに探索から戻ってこなくなるので
-        // そのスレッドの計算時間を無駄にする。またdepth固定対局でtime-outするようになる。
-
         auto score = static_cast<Value>(output[0] / FV_SCALE);
-
-        // 1) ここ、下手にclipすると学習時には影響があるような気もするが…。
-        // 2) accumulator.scoreは、差分計算の時に用いないので書き換えて問題ない。
         score = Math::clamp(score, -VALUE_MAX_EVAL, VALUE_MAX_EVAL);
-
         accumulator.score = score;
         accumulator.computed_score = true;
         return accumulator.score;
