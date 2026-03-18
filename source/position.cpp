@@ -25,6 +25,43 @@ using namespace Eval;
 // set_max_repetition_ply()で設定される、千日手の最大遡り手数
 int Position::max_repetition_ply = 16;
 
+Position::~Position() {
+#if defined(EVAL_NNUE)
+    release_nnue_accumulator_slots();
+#endif
+}
+
+#if defined(EVAL_NNUE)
+void Position::release_nnue_accumulator_slots() {
+    while (nnueAccumulatorSlots)
+    {
+        auto* next = nnueAccumulatorSlots->next;
+        delete nnueAccumulatorSlots;
+        nnueAccumulatorSlots = next;
+    }
+}
+
+void Position::bind_nnue_accumulator(StateInfo* state) {
+    ASSERT_LV3(state);
+
+    if (state->nnueAccumulator)
+        return;
+
+    for (auto* slot = nnueAccumulatorSlots; slot; slot = slot->next)
+        if (slot->owner == state)
+        {
+            state->nnueAccumulator = &slot->accumulator;
+            return;
+        }
+
+    auto* slot  = new NnueAccumulatorSlot();
+    slot->owner = state;
+    slot->next  = nnueAccumulatorSlots;
+    nnueAccumulatorSlots = slot;
+    state->nnueAccumulator = &slot->accumulator;
+}
+#endif
+
 // minor pieceは、香・桂・銀・金とその成駒に限ることにする。
 constexpr bool minor_piece_table[PIECE_NB] = {
   false,         false /*歩*/, true /*香*/,  true /*桂*/,      true /*銀*/,   false /*角*/,
@@ -416,6 +453,10 @@ void Position::set_state() const {
 
 // sfen文字列で盤面を設定する
 Position& Position::set(const std::string& sfen, StateInfo* si) {
+#if defined(EVAL_NNUE)
+    release_nnue_accumulator_slots();
+#endif
+
 #if STOCKFISH
 
 	std::memset(this, 0, sizeof(Position));
@@ -433,6 +474,10 @@ Position& Position::set(const std::string& sfen, StateInfo* si) {
 #endif
 
     st = si;
+
+#if defined(EVAL_NNUE)
+    bind_nnue_accumulator(st);
+#endif
 
     // 変な入力をされることはあまり想定していない。
     // sfen文字列は、普通GUI側から渡ってくるのでおかしい入力であることはありえないからである。
@@ -1628,6 +1673,11 @@ void Position::do_move_impl(Move m, StateInfo& newSt, bool givesCheck, const T* 
     newSt.previous = st;
     st             = &newSt;
 
+#if defined(EVAL_NNUE)
+    st->nnueAccumulator = nullptr;
+    bind_nnue_accumulator(st);
+#endif
+
     // --- 手数がらみのカウンターのインクリメント
 
     // Increment ply counters. In particular, rule50 will be reset to zero later on
@@ -2362,8 +2412,15 @@ void Position::do_null_move(StateInfo& newSt, const T& tt) {
 	std::memcpy(static_cast<void*>(& newSt), st, sizeof(StateInfo));
 #endif
 
-	newSt.previous = st;
+    auto* previousState = st;
+	newSt.previous = previousState;
     st             = &newSt;
+
+#if defined(EVAL_NNUE)
+    st->nnueAccumulator = nullptr;
+    bind_nnue_accumulator(st);
+    *st->nnueAccumulator = *previousState->nnueAccumulator;
+#endif
 
 #if STOCKFISH
 	if (st->epSquare != SQ_NONE)

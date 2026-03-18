@@ -357,6 +357,26 @@ Phase A completion note:
 - With Slice 13, the active search-path score semantics work is complete under the roadmap definition.
 - Remaining direct `ttData.value` comparisons in this file are confined to disabled `#if 0` code or explanatory comments.
 
+### Slice 14: classic NNUE accumulator storage moves behind `Position` ownership
+
+Implemented in:
+- [`position.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.h)
+- [`position.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.cpp)
+
+Changed seam:
+- `StateInfo` no longer embeds a classic NNUE `Accumulator` object directly.
+- `StateInfo` now keeps only a sidecar pointer.
+- `Position` owns and binds accumulator slots while preserving the existing `nnue_accumulator()` / `mutable_nnue_accumulator()` / `previous_nnue_accumulator()` accessors.
+
+Purpose:
+- start Phase C with the accumulator-like cache family recommended by the roadmap
+- remove the largest active evaluator-owned storage object from `StateInfo` without forcing evaluator call-site churn
+- preserve null-move accumulator reuse by cloning the previous sidecar state before invalidating score-only cache bits
+
+Verification note:
+- the affected release-build translation units compile successfully
+- a full clean link is currently blocked by pre-existing unresolved-symbol issues in the top-level `normal` / `tournament` targets, so full-engine runtime validation remains pending after that separate build issue is addressed
+
 ## Non-Goals For The First Pass
 
 Do not start by:

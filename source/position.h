@@ -194,7 +194,9 @@ struct StateInfo {
 #endif
 
 #if defined(EVAL_NNUE)
-	Eval::NNUE::Accumulator accumulator;
+	// Phase C: NNUE accumulator storage is moved out of StateInfo.
+	// StateInfo keeps only a sidecar pointer while Position owns the slots.
+	Eval::NNUE::Accumulator* nnueAccumulator;
 #endif
 
 #if defined (USE_EVAL_LIST)
@@ -296,6 +298,7 @@ public:
 	*/
 
 	Position()                           = default;
+	~Position();
 	Position(const Position&)            = delete;
 	Position& operator=(const Position&) = delete;
 
@@ -805,17 +808,18 @@ public:
     StateInfo* state() const { return st; }
 
 #if defined(EVAL_NNUE)
-    Eval::NNUE::Accumulator& nnue_accumulator() { return st->accumulator; }
-    const Eval::NNUE::Accumulator& nnue_accumulator() const { return st->accumulator; }
-    Eval::NNUE::Accumulator& mutable_nnue_accumulator() const { return st->accumulator; }
+    Eval::NNUE::Accumulator& nnue_accumulator() { return *st->nnueAccumulator; }
+    const Eval::NNUE::Accumulator& nnue_accumulator() const { return *st->nnueAccumulator; }
+    Eval::NNUE::Accumulator& mutable_nnue_accumulator() const { return *st->nnueAccumulator; }
     const Eval::NNUE::Accumulator* previous_nnue_accumulator() const {
-        return st->previous ? &st->previous->accumulator : nullptr;
+        return st->previous ? st->previous->nnueAccumulator : nullptr;
     }
     void invalidate_nnue_accumulator() {
-        st->accumulator.computed_accumulation = false;
-        st->accumulator.computed_score        = false;
+        auto& accumulator = *st->nnueAccumulator;
+        accumulator.computed_accumulation = false;
+        accumulator.computed_score        = false;
     }
-    void invalidate_nnue_score() { st->accumulator.computed_score = false; }
+    void invalidate_nnue_score() { st->nnueAccumulator->computed_score = false; }
 #endif
 
 #if defined(USE_EVAL_LIST)
@@ -1054,6 +1058,14 @@ public:
 	static void UnitTest(Test::UnitTester& tester, IEngine& engine);
 
 private:
+#if defined(EVAL_NNUE)
+    struct NnueAccumulatorSlot {
+        StateInfo*              owner = nullptr;
+        Eval::NNUE::Accumulator accumulator{};
+        NnueAccumulatorSlot*    next = nullptr;
+    };
+#endif
+
     // Initialization helpers (used while setting up a position)
 	 // 初期化用のヘルパー（局面を設定する際に使用）
 
@@ -1063,6 +1075,11 @@ private:
 
 	// StateInfoの初期化。Position::set()のタイミングで行われる。
 	void set_state() const;
+
+#if defined(EVAL_NNUE)
+    void release_nnue_accumulator_slots();
+    void bind_nnue_accumulator(StateInfo* state);
+#endif
 
 #if STOCKFISH
     void set_check_info() const;
@@ -1193,6 +1210,12 @@ private:
 #if defined(USE_EVAL_LIST)
     // 評価関数で用いる駒のリスト
     Eval::EvalList evalList;
+#endif
+
+#if defined(EVAL_NNUE)
+    // Phase C compatibility layer: Position owns NNUE sidecar storage while
+    // StateInfo holds only pointers.
+    NnueAccumulatorSlot* nnueAccumulatorSlots = nullptr;
 #endif
 
 #endif

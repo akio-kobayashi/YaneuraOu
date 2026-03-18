@@ -203,6 +203,13 @@ Current status:
 - Keep accessor compatibility during the transition.
 - Verify each storage move with a full clean rebuild before proceeding.
 
+Current status:
+- The first Phase C slice is now in progress: classic NNUE accumulator storage is no longer embedded in `StateInfo` for active code paths.
+- `StateInfo` now keeps only an NNUE sidecar pointer, while `Position` owns the accumulator slot list and binds fresh storage on `set()`, `do_move()`, and `do_null_move()`.
+- Existing `Position` accumulator accessors remain the compatibility layer, so evaluator and feature-transformer call sites do not depend on the storage move.
+- `do_null_move()` explicitly clones the previous accumulator state before invalidating the score cache so null-move reuse semantics stay unchanged.
+- A full clean link is currently blocked by pre-existing unresolved-symbol issues in the `normal` / `tournament` targets, but the affected Phase C translation units compile successfully under the release configuration.
+
 ### Phase D: Restructure search/eval state
 - Define a search thread context object.
 - Consolidate accumulator/cache ownership.

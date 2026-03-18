@@ -338,9 +338,9 @@ CPPFLAGS += -DNO_EXCEPTIONS
 LDFLAGS += -lpthread
 LDFLAGS += -v
 
-OBJDIR   = ../obj
+OBJDIR   = ../obj/default
 ifeq "$(strip $(OBJDIR))" ""
-	OBJDIR = ..
+	OBJDIR = ../obj/default
 endif
 
 #SOURCES  = $(wildcard *.cpp)
@@ -693,15 +693,15 @@ endif
 
 # 通常使用。
 normal: run_python_script
-	$(MAKE) CPPFLAGS='$(CPPFLAGS) $(LTOFLAGS)' LDFLAGS='$(LDFLAGS) $(LTOFLAGS)' $(TARGET)
+	$(MAKE) OBJDIR=../obj/normal CPPFLAGS='$(CPPFLAGS) $(LTOFLAGS)' LDFLAGS='$(LDFLAGS) $(LTOFLAGS)' $(TARGET)
 
 # 学習用。openmp , openblasなどを有効にする。
 evallearn: run_python_script
-	$(MAKE) CPPFLAGS='$(CPPFLAGS) $(LTOFLAGS) $(OPENMP) $(BLAS_CPPFLAGS) -DEVAL_LEARN' LDFLAGS='$(LDFLAGS) $(OPENMP_LDFLAGS) $(BLAS_LDFLAGS) $(LTOFLAGS)' $(TARGET)
+	$(MAKE) OBJDIR=../obj/evallearn CPPFLAGS='$(CPPFLAGS) $(LTOFLAGS) $(OPENMP) $(BLAS_CPPFLAGS) -DEVAL_LEARN' LDFLAGS='$(LDFLAGS) $(OPENMP_LDFLAGS) $(BLAS_LDFLAGS) $(LTOFLAGS)' $(TARGET)
 
 # トーナメント用
 tournament: run_python_script
-	$(MAKE) CPPFLAGS='$(CPPFLAGS) $(LTOFLAGS) -DFOR_TOURNAMENT' LDFLAGS='$(LDFLAGS) $(LTOFLAGS)' $(TARGET)
+	$(MAKE) OBJDIR=../obj/tournament CPPFLAGS='$(CPPFLAGS) $(LTOFLAGS) -DFOR_TOURNAMENT' LDFLAGS='$(LDFLAGS) $(LTOFLAGS)' $(TARGET)
 
 #　とりあえずPGOはAVX2とSSE4.2専用
 prof:
@@ -720,6 +720,7 @@ pgo:
 	$(MAKE) profuse
 
 clean:
-	rm -f $(OBJECTS) $(CUDA_OBJECTS) $(OBJC_OBJECTS) $(DEPENDS) $(TARGET) ${OBJECTS:.o=.gcda}
+	rm -rf ../obj/default ../obj/normal ../obj/evallearn ../obj/tournament
+	rm -f $(TARGET)
 
 -include $(DEPENDS)
