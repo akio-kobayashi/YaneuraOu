@@ -698,10 +698,10 @@ public:
 
 #if defined(USE_EVAL_LIST)
 	// 評価関数で使うための、どの駒番号の駒がどこにあるかなどの情報。
-	Eval::EvalList* eval_list() { return &evalList; }
-	const Eval::EvalList* eval_list() const { return &evalList; }
-	Eval::EvalList* mutable_eval_list() { return &evalList; }
-	void clear_eval_list() { evalList.clear(); }
+	Eval::EvalList* eval_list() { return &evaluatorStorage->evalListSidecar.evalList; }
+	const Eval::EvalList* eval_list() const { return &evaluatorStorage->evalListSidecar.evalList; }
+	Eval::EvalList* mutable_eval_list() { return &evaluatorStorage->evalListSidecar.evalList; }
+	void clear_eval_list() { evaluatorStorage->evalListSidecar.evalList.clear(); }
 	int eval_list_length() const { return eval_list()->length(); }
 	const Eval::BonaPiece* eval_piece_list_fb() const { return eval_list()->piece_list_fb(); }
 	const Eval::BonaPiece* eval_piece_list_fw() const { return eval_list()->piece_list_fw(); }
@@ -1062,7 +1062,7 @@ public:
 	// UnitTest
 	static void UnitTest(Test::UnitTester& tester, IEngine& engine);
 
-private:
+public:
 #if defined(EVAL_NNUE)
     struct NnueAccumulatorSlot {
         StateInfo*              owner = nullptr;
@@ -1079,6 +1079,29 @@ private:
     };
 #endif
 
+#if defined(USE_EVAL_LIST)
+    struct EvalListSidecar {
+        Eval::EvalList evalList{};
+    };
+#endif
+
+    struct EvaluatorStorage {
+#if defined(EVAL_NNUE)
+        NnueAccumulatorSlot* nnueAccumulatorSlots = nullptr;
+#endif
+#if defined(USE_PIECE_VALUE) || (defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(USE_EVAL_LIST)))
+        ClassicEvalStateSlot* classicEvalStateSlots = nullptr;
+#endif
+#if defined(USE_EVAL_LIST)
+        EvalListSidecar evalListSidecar{};
+#endif
+    };
+
+    void bind_external_evaluator_storage(EvaluatorStorage* storage);
+    void detach_external_evaluator_storage();
+    bool has_external_evaluator_storage() const { return evaluatorStorage && evaluatorStorage != ownedEvaluatorStorage; }
+
+private:
     // Initialization helpers (used while setting up a position)
 	 // 初期化用のヘルパー（局面を設定する際に使用）
 
@@ -1098,6 +1121,13 @@ private:
     void release_classic_eval_state_slots();
     void bind_classic_eval_state(StateInfo* state);
 #endif
+
+#if defined(USE_EVAL_LIST)
+    void release_eval_list_sidecar();
+    void bind_eval_list_sidecar();
+#endif
+    void release_evaluator_storage();
+    void bind_evaluator_storage();
 
 #if STOCKFISH
     void set_check_info() const;
@@ -1225,22 +1255,12 @@ private:
 	// set_max_repetition_ply()で設定される、千日手の最大遡り手数
     static int max_repetition_ply /* = 16 */;
 
-#if defined(USE_EVAL_LIST)
-    // 評価関数で用いる駒のリスト
-    Eval::EvalList evalList;
-#endif
-
-#if defined(EVAL_NNUE)
-    // Phase C compatibility layer: Position owns NNUE sidecar storage while
-    // StateInfo holds only pointers.
-    NnueAccumulatorSlot* nnueAccumulatorSlots = nullptr;
-#endif
-
-#if defined(USE_PIECE_VALUE) || (defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(USE_EVAL_LIST)))
-    // Phase C compatibility layer: Position owns classic evaluator state
-    // sidecars while StateInfo holds only pointers.
-    ClassicEvalStateSlot* classicEvalStateSlots = nullptr;
-#endif
+    // Phase C compatibility layer: Position uses a single evaluator storage
+    // object that contains the active sidecars. Ownership can now live
+    // outside Position (for worker/thread scoped storage), with a local
+    // fallback kept for non-search callers.
+    EvaluatorStorage* ownedEvaluatorStorage = nullptr;
+    EvaluatorStorage* evaluatorStorage = nullptr;
 
 #endif
 };

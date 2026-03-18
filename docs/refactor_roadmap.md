@@ -209,6 +209,8 @@ Current status:
 - Existing `Position` accumulator accessors remain the compatibility layer, so evaluator and feature-transformer call sites do not depend on the storage move.
 - `do_null_move()` explicitly clones the previous accumulator state before invalidating the score cache so null-move reuse semantics stay unchanged.
 - Classic evaluator-owned `materialValue`, `EvalSum`, and `DirtyPiece` storage now also move through a `Position`-owned sidecar, leaving `StateInfo` with compatibility pointers instead of inline storage for those active code paths.
+- `EvalList` and the active evaluator sidecars are now grouped under a single `Position::EvaluatorStorage` compatibility object.
+- Worker root positions now bind that compatibility object from `Thread` scope instead of always allocating it inside `Position`, so the first external ownership step is now in place for active search paths.
 - The build target mismatch that previously mixed `normal` and `tournament` object files is also fixed by splitting object directories per target, so clean tournament rebuilds and short USI search runs now succeed again.
 
 ### Phase D: Restructure search/eval state
@@ -238,8 +240,8 @@ The following are out of scope for this branch:
 ## Immediate Next Step
 
 The next implementation slice on this branch should be:
-- continue replacing remaining open-coded evaluator-state fields in `StateInfo` with grouped or redirected accessors,
-- then choose one evaluator-owned state family and move its storage behind the existing access seams,
+- continue moving evaluator-storage ownership outward from `Position` toward worker or thread context objects,
+- keep fallback storage for non-search utility callers until those call sites are explicitly migrated,
 - then proceed to broader thread-context and NUMA ownership cleanup,
-- keep existing NNUE behavior through a transitional compatibility layer,
+- keep existing NNUE behavior through the current compatibility layer,
 - and verify each step against [`docs/eval_value_contract.md`](/Users/akio/Documents/GitHub/YaneuraOu/docs/eval_value_contract.md).

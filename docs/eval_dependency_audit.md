@@ -397,6 +397,28 @@ Verification note:
 - `make -C source tournament APPLE_CPU=native -j4` succeeds after the target object-directory split fix
 - the resulting tournament binary passes `usi`, `isready`, short `go movetime`, and `quit`
 
+### Slice 16: thread root positions own the active evaluator-storage compatibility object
+
+Implemented in:
+- [`position.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.h)
+- [`position.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.cpp)
+- [`thread.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/thread.h)
+- [`thread.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/thread.cpp)
+
+Changed seam:
+- `Position` now treats `EvaluatorStorage` as a bindable compatibility object instead of an always-self-owned allocation.
+- Non-search callers still get a local fallback allocation path through `bind_evaluator_storage()`.
+- Search-thread root positions bind `EvaluatorStorage` from `Thread` scope, so active search no longer depends on `Position` owning the evaluator sidecars itself.
+
+Purpose:
+- continue Phase C by moving evaluator-storage ownership one step outward from `Position`
+- keep the existing `Position` accessors and sidecar binding rules stable while changing only the lifetime owner
+- prepare for later worker-context or NUMA-local ownership work without forcing unrelated helper-tool call sites to move at the same time
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, and `quit`
+
 ## Non-Goals For The First Pass
 
 Do not start by:
