@@ -221,8 +221,14 @@ bool USIEngine::usi_cmdexec(const std::string& cmd) {
         それを言えばstopにだって…。
 	*/
 #endif
+    {
         // "stop"コマンドが来るとEngine.stop()が呼び出され、その結果threads.stop = trueとなる。
         engine.stop();
+
+        // quitでループを抜ける前には探索を停止完了まで待つ。
+        if (token == "quit")
+            engine.wait_for_search_finished();
+    }
 
     // The GUI sends 'ponderhit' to tell that the user has played the expected move.
     // So, 'ponderhit' is sent if pondering was done on the same move that the user

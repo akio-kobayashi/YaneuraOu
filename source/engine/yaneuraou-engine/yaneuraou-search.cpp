@@ -18,6 +18,7 @@
 #include <fstream>
 #include <iomanip>
 #include <cmath>	// std::log(),std::pow(),std::round()
+#include <cstdlib>
 #include <cstring>	// memset()
 
 #include "yaneuraou-search.h"
@@ -282,6 +283,14 @@ void YaneuraOuEngine::add_options() {
 
 	// もしTUNE()マクロで新たにパラメーターを追加したなら、それを反映させる。
 	Tune::init(options);
+}
+
+YaneuraOuEngine::~YaneuraOuEngine() {
+    stop();
+    wait_for_search_finished();
+
+    if (threads.size() > 0)
+        threads.threads.clear();
 }
 
 // "isready"のタイミングでの初期化処理。
@@ -2387,7 +2396,7 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
 
 	// 🤔 同じ名前で呼び分けできないので、
 	//     こちらを名前を do_move_ にする。
-    auto do_move_ = [&](Position & pos, Move move, StateInfo st, Stack* ss) {
+    auto do_move_ = [&](Position & pos, Move move, StateInfo& st, Stack* ss) {
         if (!evaluated)
         {
             evaluated = true;
@@ -2395,7 +2404,7 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
         }
         this->do_move(pos, move, st, ss);
     };
-    auto do_null_move = [&](Position& pos, StateInfo st) {
+    auto do_null_move = [&](Position& pos, StateInfo& st) {
         if (!evaluated)
         {
             evaluated = true;
@@ -2404,7 +2413,7 @@ Value YaneuraOuWorker::search(Position& pos, Stack* ss, Value alpha, Value beta,
         this->do_null_move(pos, st);
     };
 #else
-    auto do_move_ = [&](Position& pos, Move move, StateInfo st, Stack* ss) { this->do_move(pos, move, st, ss); };
+    auto do_move_ = [&](Position& pos, Move move, StateInfo& st, Stack* ss) { this->do_move(pos, move, st, ss); };
 #endif
 
 	// 📌 Timerの監視
@@ -5932,6 +5941,9 @@ void engine_main() {
 
     // USIコマンドの応答のためのループ
     usi.loop();
+
+    std::fflush(nullptr);
+    std::_Exit(EXIT_SUCCESS);
 }
 
 // このentry pointを登録しておく。

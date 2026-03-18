@@ -324,6 +324,8 @@ class YaneuraOuEngine: public Engine {
     YaneuraOuEngine(/* std::optional<std::string> path = std::nullopt */) :
         manager(updateContext) {}
 
+    virtual ~YaneuraOuEngine() override;
+
     // 📝 やねうら王では、CommandLine::gから取得できるので使わない。
     // const std::string binaryDirectory;
 
