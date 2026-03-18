@@ -194,7 +194,9 @@ Current status:
 - This keeps existing behavior while creating a seam for later evaluator-state ownership changes.
 - Classic NNUE accumulator access is now routed through `Position` helper methods instead of open-coded `state()->accumulator` references.
 - Classic-eval `materialValue`, `DirtyPiece`, and `EvalSum` access is now also routed through `Position` helper methods or setter helpers in active evaluator code paths.
-- Remaining work in this phase is mainly storage relocation, compatibility cleanup, and non-active textual references rather than broad search/eval call-site churn.
+- `EvalList` reads and writes in active evaluator, learner, NNUE feature, and serializer paths are now also routed through `Position` helper methods.
+- Phase B is complete for active code paths: remaining direct storage references are limited to helper implementations inside `Position`, storage declarations, assertions, or explanatory comments.
+- The next remaining work is Phase C storage relocation and compatibility cleanup rather than additional broad search/eval call-site churn.
 
 ### Phase C: Move evaluator ownership
 - Relocate evaluator-local mutable state out of `StateInfo` in small slices.

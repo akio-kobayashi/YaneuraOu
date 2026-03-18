@@ -40,10 +40,10 @@ class PE9 {
   // BonaPieceと利き数から特徴量のインデックスを求める
   static IndexType MakeIndex(BonaPiece p, int effect1, int effect2);
 
- private:
+private:
   // 駒の情報を取得する
   static void GetPieces(const Position& pos, Color perspective,
-                        BonaPiece** pieces);
+                        const BonaPiece** pieces);
 };
 
 } // namespace Eval::NNUE::Features

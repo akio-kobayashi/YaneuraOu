@@ -50,10 +50,10 @@ class HalfRelativeKP {
   // 玉の位置とBonaPieceから特徴量のインデックスを求める
   static IndexType MakeIndex(Square sq_k, BonaPiece p);
 
- private:
+private:
   // 駒の情報を取得する
   static void GetPieces(const Position& pos, Color perspective,
-                        BonaPiece** pieces, Square* sq_target_k);
+                        const BonaPiece** pieces, Square* sq_target_k);
 };
 
 } // namespace Eval::NNUE::Features

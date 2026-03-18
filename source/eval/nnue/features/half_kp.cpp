@@ -21,10 +21,8 @@ inline IndexType HalfKP<AssociatedKing>::MakeIndex(Square sq_k, BonaPiece p) {
 template <Side AssociatedKing>
 inline void HalfKP<AssociatedKing>::GetPieces(
     const Position& pos, Color perspective,
-    BonaPiece** pieces, Square* sq_target_k) {
-  *pieces = (perspective == BLACK) ?
-      pos.eval_list()->piece_list_fb() :
-      pos.eval_list()->piece_list_fw();
+    const BonaPiece** pieces, Square* sq_target_k) {
+  *pieces = pos.eval_piece_list(perspective);
   const PieceNumber target = (AssociatedKing == Side::kFriend) ?
       static_cast<PieceNumber>(PIECE_NUMBER_KING + perspective) :
       static_cast<PieceNumber>(PIECE_NUMBER_KING + ~perspective);
@@ -38,7 +36,7 @@ void HalfKP<AssociatedKing>::AppendActiveIndices(
   // コンパイラの警告を回避するため、配列サイズが小さい場合は何もしない
   if (RawFeatures::kMaxActiveDimensions < kMaxActiveDimensions) return;
 
-  BonaPiece* pieces;
+  const BonaPiece* pieces;
   Square sq_target_k;
   GetPieces(pos, perspective, &pieces, &sq_target_k);
   for (PieceNumber i = PIECE_NUMBER_ZERO; i < PIECE_NUMBER_KING; ++i) {
@@ -51,7 +49,7 @@ template <Side AssociatedKing>
 void HalfKP<AssociatedKing>::AppendChangedIndices(
     const Position& pos, Color perspective,
     IndexList* removed, IndexList* added) {
-  BonaPiece* pieces;
+  const BonaPiece* pieces;
   Square sq_target_k;
   GetPieces(pos, perspective, &pieces, &sq_target_k);
   const auto& dp = pos.dirty_piece();

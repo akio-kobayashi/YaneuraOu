@@ -54,10 +54,8 @@ IndexType PE9::MakeIndex(BonaPiece p, int effect1, int effect2) {
 // 駒の情報を取得する
 inline void PE9::GetPieces(
     const Position& pos, Color perspective,
-    BonaPiece** pieces) {
-  *pieces = (perspective == BLACK) ?
-      pos.eval_list()->piece_list_fb() :
-      pos.eval_list()->piece_list_fw();
+    const BonaPiece** pieces) {
+  *pieces = pos.eval_piece_list(perspective);
 }
 
 // 特徴量のうち、値が1であるインデックスのリストを取得する
@@ -66,7 +64,7 @@ void PE9::AppendActiveIndices(
   // コンパイラの警告を回避するため、配列サイズが小さい場合は何もしない
   if (RawFeatures::kMaxActiveDimensions < kMaxActiveDimensions) return;
 
-  BonaPiece* pieces;
+  const BonaPiece* pieces;
   GetPieces(pos, perspective, &pieces);
   auto& board_effect = pos.board_effect;
 
@@ -85,7 +83,7 @@ void PE9::AppendActiveIndices(
 void PE9::AppendChangedIndices(
     const Position& pos, Color perspective,
     IndexList* removed, IndexList* added) {
-  BonaPiece* pieces;
+  const BonaPiece* pieces;
   GetPieces(pos, perspective, &pieces);
   const auto& dp = pos.dirty_piece();
 

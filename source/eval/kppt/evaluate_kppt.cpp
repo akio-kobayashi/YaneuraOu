@@ -384,13 +384,12 @@ namespace Eval {
 		const auto* ppkppb = kpp[sq_bk];
 		const auto* ppkppw = kpp[Inv(sq_wk)];
 
-		const auto* eval_list = pos.eval_list();
-		auto length = eval_list->length();
+		auto length = pos.eval_list_length();
 		
 #if !defined (USE_EVAL_MAKE_LIST_FUNCTION)
 
-		auto list_fb = eval_list->piece_list_fb();
-		auto list_fw = eval_list->piece_list_fw();
+		auto list_fb = pos.eval_piece_list_fb();
+		auto list_fw = pos.eval_piece_list_fw();
 
 #else
 		// -----------------------------------
@@ -401,8 +400,8 @@ namespace Eval {
 		// バッファを確保してコピー
 		BonaPiece list_fb[40];
 		BonaPiece list_fw[40];
-		memcpy(list_fb, eval_list->piece_list_fb(), sizeof(BonaPiece) * 40);
-		memcpy(list_fw, eval_list->piece_list_fw(), sizeof(BonaPiece) * 40);
+		memcpy(list_fb, pos.eval_piece_list_fb(), sizeof(BonaPiece) * 40);
+		memcpy(list_fw, pos.eval_piece_list_fw(), sizeof(BonaPiece) * 40);
 
 		// ユーザーは、この関数でBonaPiece番号の自由な組み換えを行なうものとする。
 		make_list_function(pos, list_fb, list_fw);
@@ -474,8 +473,8 @@ namespace Eval {
 	// 後手玉が移動したときの先手玉に対するの差分
 	std::array<s32, 2> do_a_black(const Position& pos, const ExtBonaPiece ebp) {
 		const Square sq_bk = pos.square<KING>(BLACK);
-		const auto* list0 = pos.eval_list()->piece_list_fb();
-		const int length = pos.eval_list()->length();
+		const auto* list0 = pos.eval_piece_list_fb();
+		const int length = pos.eval_list_length();
 
 		const auto* pkppb = kpp[sq_bk][ebp.fb];
 		std::array<s32, 2> sum = { { pkppb[list0[0]][0], pkppb[list0[0]][1] } };
@@ -487,8 +486,8 @@ namespace Eval {
 	// 先手玉が移動したときの後手玉に対する差分
 	std::array<s32, 2> do_a_white(const Position& pos, const ExtBonaPiece ebp) {
 		const Square sq_wk = pos.square<KING>(WHITE);
-		const auto* list1 = pos.eval_list()->piece_list_fw();
-		const int length = pos.eval_list()->length();
+		const auto* list1 = pos.eval_piece_list_fw();
+		const int length = pos.eval_list_length();
 
 		const auto* pkppw = kpp[Inv(sq_wk)][ebp.fw];
 		std::array<s32, 2> sum = { { pkppw[list1[0]][0], pkppw[list1[0]][1] } };
@@ -508,9 +507,9 @@ namespace Eval {
 		*/
 		const Square sq_bk = pos.square<KING>(BLACK);
 		const Square sq_wk = pos.square<KING>(WHITE);
-		const auto list0 = pos.eval_list()->piece_list_fb();
-		const auto list1 = pos.eval_list()->piece_list_fw();
-		const int length = pos.eval_list()->length();
+		const auto list0 = pos.eval_piece_list_fb();
+		const auto list1 = pos.eval_piece_list_fw();
+		const int length = pos.eval_list_length();
 
 		EvalSum sum;
 
@@ -633,7 +632,7 @@ namespace Eval {
 #if defined (EVAL_LEARN)
 			prev == nullptr ||
 #endif
-			!prev->sum.evaluated())
+			!pos.eval_sum_evaluated(prev))
 		{
 			// 全計算
 			compute_eval_impl(pos);
@@ -646,14 +645,14 @@ namespace Eval {
 		// ひとつずつ遡りながらsumKPPがVALUE_NONEでないところまで探してそこからの差分を計算することは出来るが
 		// 現状、探索部では毎node、evaluate()を呼び出すから問題ない。
 
-		auto& dp = now->dirtyPiece;
+		auto& dp = pos.dirty_piece(now);
 
 		// 移動させた駒は最大2つある。その数
 		int moved_piece_num = dp.dirty_num;
 
-		auto list0 = pos.eval_list()->piece_list_fb();
-		auto list1 = pos.eval_list()->piece_list_fw();
-		const int length = pos.eval_list()->length();
+		auto list0 = pos.eval_piece_list_fb();
+		auto list1 = pos.eval_piece_list_fw();
+		const int length = pos.eval_list_length();
 
 		auto dirty = dp.pieceNo[0];
 
@@ -663,14 +662,14 @@ namespace Eval {
 			// 前のnodeの評価値からの増分を計算していく。
 			// (直接この変数に加算していく)
 			// この意味においてdiffという名前は少々不適切ではあるが。
-			EvalSum diff = prev->sum;
+			EvalSum diff = pos.eval_sum(prev);
 
 			auto sq_bk = pos.square<KING>(BLACK);
 			auto sq_wk = pos.square<KING>(WHITE);
 
 			// ΣKKPは最初から全計算するしかないので初期化する。
 			diff.p[2] = kk[sq_bk][sq_wk];
-			diff.p[2][0] += now->materialValue * FV_SCALE;
+			diff.p[2][0] += pos.material_value(now) * FV_SCALE;
 
 			// 後手玉の移動(片側分のKPPを丸ごと求める)
 			if (dirty == PIECE_NUMBER_WKING)
@@ -855,7 +854,7 @@ namespace Eval {
 			}
 
 			// sumの計算が終わったのでpos.eval_sum()に反映させておく。(これがこの関数の返し値に相当する。)
-			now->sum = diff;
+			pos.set_eval_sum(now, diff);
 
 		} else {
 
@@ -908,9 +907,9 @@ namespace Eval {
 			list1[listIndex] = dp.changed_piece[0].new_piece.fw;
 
 			// 前nodeからの駒割りの増分を加算。
-			diff.p[2][0] += (now->materialValue - prev->materialValue) * FV_SCALE;
+			diff.p[2][0] += (pos.material_value(now) - pos.material_value(prev)) * FV_SCALE;
 
-			now->sum = diff + prev->sum;
+			pos.set_eval_sum(now, diff + pos.eval_sum(prev));
 		}
 
 	}
@@ -1097,12 +1096,10 @@ namespace Eval {
 		const auto* ppkppb = kpp[sq_bk];
 		const auto* ppkppw = kpp[Inv(sq_wk)];
 
-		const auto* eval_list = pos.eval_list();
-
 #if !defined (USE_EVAL_MAKE_LIST_FUNCTION)
 
-		auto list_fb = eval_list->piece_list_fb();
-		auto list_fw = eval_list->piece_list_fw();
+		auto list_fb = pos.eval_piece_list_fb();
+		auto list_fw = pos.eval_piece_list_fw();
 
 #else
 		// -----------------------------------
@@ -1113,8 +1110,8 @@ namespace Eval {
 		// バッファを確保してコピー
 		BonaPiece list_fb[40];
 		BonaPiece list_fw[40];
-		memcpy(list_fb, eval_list->piece_list_fb(), sizeof(BonaPiece) * 40);
-		memcpy(list_fw, eval_list->piece_list_fw(), sizeof(BonaPiece) * 40);
+		memcpy(list_fb, pos.eval_piece_list_fb(), sizeof(BonaPiece) * 40);
+		memcpy(list_fw, pos.eval_piece_list_fw(), sizeof(BonaPiece) * 40);
 
 		// ユーザーは、この関数でBonaPiece番号の自由な組み換えを行なうものとする。
 		make_list_function(pos, list_fb, list_fw);

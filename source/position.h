@@ -693,6 +693,22 @@ public:
 	Eval::EvalList* eval_list() { return &evalList; }
 	const Eval::EvalList* eval_list() const { return &evalList; }
 	Eval::EvalList* mutable_eval_list() { return &evalList; }
+	void clear_eval_list() { evalList.clear(); }
+	int eval_list_length() const { return eval_list()->length(); }
+	const Eval::BonaPiece* eval_piece_list_fb() const { return eval_list()->piece_list_fb(); }
+	const Eval::BonaPiece* eval_piece_list_fw() const { return eval_list()->piece_list_fw(); }
+	const Eval::BonaPiece* eval_piece_list(Color perspective) const {
+		return perspective == BLACK ? eval_piece_list_fb() : eval_piece_list_fw();
+	}
+	Eval::ExtBonaPiece eval_list_bona_piece(PieceNumber piece_no) const {
+		return eval_list()->bona_piece(piece_no);
+	}
+	void set_eval_list_piece(PieceNumber piece_no, Square sq, Piece pc) {
+		mutable_eval_list()->put_piece(piece_no, sq, pc);
+	}
+	void set_eval_list_hand_piece(PieceNumber piece_no, Color c, PieceType pt, int count) {
+		mutable_eval_list()->put_piece(piece_no, c, pt, count);
+	}
 #endif
 
 #if defined (USE_SEE)
@@ -805,19 +821,26 @@ public:
 #if defined(USE_EVAL_LIST)
     Eval::DirtyPiece& dirty_piece() { return st->dirtyPiece; }
     const Eval::DirtyPiece& dirty_piece() const { return st->dirtyPiece; }
+    Eval::DirtyPiece& dirty_piece(StateInfo* state) const { return state->dirtyPiece; }
+    const Eval::DirtyPiece& dirty_piece(const StateInfo* state) const { return state->dirtyPiece; }
 #endif
 
 #if defined(USE_PIECE_VALUE)
     Value material_value() const { return st->materialValue; }
     void set_material_value(Value value) { st->materialValue = value; }
+    Value material_value(const StateInfo* state) const { return state->materialValue; }
 #endif
 
 #if defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT))
     Eval::EvalSum& eval_sum() { return st->sum; }
     const Eval::EvalSum& eval_sum() const { return st->sum; }
     Eval::EvalSum& mutable_eval_sum() const { return st->sum; }
+    Eval::EvalSum& mutable_eval_sum(StateInfo* state) const { return state->sum; }
+    const Eval::EvalSum& eval_sum(const StateInfo* state) const { return state->sum; }
     void set_eval_sum(const Eval::EvalSum& value) { st->sum = value; }
+    void set_eval_sum(StateInfo* state, const Eval::EvalSum& value) const { state->sum = value; }
     void invalidate_eval_sum() const { st->sum.p[0][0] = VALUE_NOT_EVALUATED; }
+    bool eval_sum_evaluated(const StateInfo* state) const { return state->sum.evaluated(); }
 #endif
 
 	// put_piece()やremove_piece()を用いたときは、最後にupdate_bitboards()を呼び出して
@@ -1099,13 +1122,15 @@ private:
 	}
 
 	// c側の手駒ptの(最後の1枚の)PieceNumberを返す。
-	PieceNumber piece_no_of(Color c, PieceType pt) const { return evalList.piece_no_of_hand(bona_piece_of(c, pt)); }
+	PieceNumber piece_no_of(Color c, PieceType pt) const {
+		return eval_list()->piece_no_of_hand(bona_piece_of(c, pt));
+	}
 
 	// 盤上のsqの升にある駒のPieceNumberを返す。
 	PieceNumber piece_no_of(Square sq) const
 	{
 		ASSERT_LV3(piece_on(sq) != NO_PIECE);
-		PieceNumber n = evalList.piece_no_of_board(sq);
+		PieceNumber n = eval_list()->piece_no_of_board(sq);
 		ASSERT_LV3(is_ok(n));
 		return n;
 	}
