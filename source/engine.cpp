@@ -331,10 +331,8 @@ void Engine::resize_threads() {
 
 	auto worker_factory = [&](size_t threadIdx,
                               NumaReplicatedAccessToken numaAccessToken,
-                              Position& rootPos,
-                              StateInfo& rootState,
-                              Search::RootMoves& rootMoves)
-		{ return std::make_unique<Search::Worker>(options, threads, threadIdx, numaAccessToken, rootPos, rootState, rootMoves); };
+                              Search::RootSearchContext rootSearchContext)
+		{ return std::make_unique<Search::Worker>(options, threads, threadIdx, numaAccessToken, rootSearchContext); };
     threads.set(numaContext.get_numa_config(), options, options["Threads"], worker_factory);
 #endif
 

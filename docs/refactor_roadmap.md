@@ -243,6 +243,17 @@ Current status:
 - Consolidate accumulator/cache ownership.
 - Clarify NUMA-local versus thread-local data.
 
+Current status:
+- The first Phase D slice is now in progress: thread-local root search state is grouped under `Search::ThreadRootState`, and worker construction now receives a `Search::RootSearchContext` instead of three loose root references.
+- This does not change ownership yet, but it fixes the first typed seam for later hot-state relocation and locality cleanup.
+- Root-position setup in `ThreadPool::start_thinking()` now also routes through that same root-search context seam instead of open-coding three separate worker-root member updates.
+- `ThreadRootState` now owns the actual root-position and root-move setup helpers as well, so `ThreadPool::start_thinking()` no longer open-codes the per-thread root-state population sequence.
+- That per-thread root-search preparation is now grouped under one `ThreadRootState::prepare_root_search(...)` call, reducing more duplicated setup choreography before locality work starts.
+- The thread-local root state's evaluator-binding hookup now also lives on `ThreadRootState`, so `Thread` construction no longer reaches inside the root position to wire that compatibility state manually.
+- `ThreadPool::start_thinking()` now hands off per-thread search setup through `Thread::prepare_for_search(...)`, so thread-local preparation logic is starting to live on the thread-side seam rather than in the pool loop body.
+- The non-Stockfish per-thread root-search reset path now executes through `Worker::prepare_for_search(...)`, which is a better home for worker-local hot-state reset than open-coding that logic in `ThreadPool`.
+- Thread-local NUMA and root-search state are now grouped under `Search::ThreadSearchContext`, so `Thread` no longer stores its NUMA token and root-search state as unrelated members.
+
 ### Phase E: Replace macro usage in non-hot layers
 - Convert simple feature checks into typed config helpers.
 - Shrink direct `config.h` includes in leaf modules.

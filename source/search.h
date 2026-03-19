@@ -120,6 +120,57 @@ struct RootMove
 
 using RootMoves = std::vector<RootMove>;
 
+struct RootSearchContext {
+    Position&  rootPos;
+    StateInfo& rootState;
+    RootMoves& rootMoves;
+};
+
+struct ThreadRootState {
+    Position::EvaluatorStorageBinding evaluatorStorageBinding;
+    Position                          rootPos;
+    StateInfo                         rootState;
+    RootMoves                         rootMoves;
+
+    void bind_evaluator_storage() {
+        rootPos.set_evaluator_storage_binding(&evaluatorStorageBinding);
+    }
+
+    RootSearchContext root_search_context() {
+        return {rootPos, rootState, rootMoves};
+    }
+
+    void set_root_moves(const RootMoves& moves) {
+        rootMoves = moves;
+    }
+
+    void prepare_root_search(const Position& position, const StateInfo& state, const RootMoves& moves) {
+        set_root_moves(moves);
+        set_root_position(position, state);
+    }
+
+#if STOCKFISH
+    void set_root_position(const Position& position, const StateInfo& state) {
+        rootPos.set(position.fen(), position.is_chess960(), &rootState);
+        rootState = state;
+    }
+#else
+    void set_root_position(const Position& position, const StateInfo& state) {
+        rootPos.set(position.sfen(), &rootState);
+        rootState = state;
+    }
+#endif
+};
+
+struct ThreadSearchContext {
+    NumaReplicatedAccessToken numaAccessToken;
+    ThreadRootState           rootState;
+
+    RootSearchContext root_search_context() {
+        return rootState.root_search_context();
+    }
+};
+
 // goコマンドでの探索時に用いる、持ち時間設定などが入った構造体
 // "ponder"のフラグはここに含まれず、Threads.ponderにあるので注意。
 struct LimitsType {
@@ -312,21 +363,21 @@ struct UpdateContext {
 class Worker;
 typedef std::function<std::unique_ptr<Worker>(size_t /*threadIdx*/,
                                               NumaReplicatedAccessToken /*numaAccessToken*/,
-                                              Position& /*rootPos*/,
-                                              StateInfo& /*rootState*/,
-                                              RootMoves& /*rootMoves*/)> WorkerFactory;
+                                              RootSearchContext /*rootSearchContext*/)> WorkerFactory;
 
 class Worker
 {
 public:
 
+    RootSearchContext root_search_context() {
+        return {rootPos, rootState, rootMoves};
+    }
+
 	Worker(OptionsMap& options,
            ThreadPool& threads,
            size_t threadIdx,
            NumaReplicatedAccessToken numaAccessToken,
-           Position& rootPos,
-           StateInfo& rootState,
-           RootMoves& rootMoves);
+           RootSearchContext rootSearchContext);
 
 	// Called at instantiation to initialize reductions tables.
     // Reset histories, usually before a new game.
@@ -360,6 +411,12 @@ public:
 	       呼び出されるようなevent handlerが必要となり、それが、このpre_start_searching()である。
 	*/
 	virtual void pre_start_searching() {}
+
+	void prepare_for_search(ThreadRootState&      rootSearchState,
+	                        const LimitsType&     limits,
+	                        const Position&       rootPosition,
+	                        const StateInfo&      rootStateSource,
+	                        const RootMoves&      rootMovesSource);
 
 	// メインスレッドであるならtrueを返す。
 	bool is_mainthread() const { return threadIdx == 0; }

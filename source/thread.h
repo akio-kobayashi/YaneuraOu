@@ -94,9 +94,7 @@ namespace Search {
 	class Worker;
 	typedef std::function<std::unique_ptr<Worker>(size_t /*thread_idx*/,
                                                   NumaReplicatedAccessToken /*token*/,
-                                                  Position&,
-                                                  StateInfo&,
-                                                  RootMoves&)> WorkerFactory;
+                                                  RootSearchContext)> WorkerFactory;
 }
 
 class Thread {
@@ -133,6 +131,10 @@ public:
 
 	// jobを実行する。jobは引数fで渡す。
 	void run_custom_job(std::function<void()> f);
+	void prepare_for_search(const Search::LimitsType& limits,
+	                        const Position&           pos,
+	                        const StateInfo&          rootStateSource,
+	                        const Search::RootMoves&  rootMovesSource);
 
 	// 評価関数パラメーターが、このthreadが属するNUMAにも配置されているかを確かめて、
 	// 配置されていなければ、評価関数パラメーターをコピーする。
@@ -155,6 +157,7 @@ public:
 	// 💡 searchingフラグがfalseになるのを待つ。
 
 	void   wait_for_search_finished();
+	Search::RootSearchContext root_search_context();
 
 	// Threadの自身のスレッド番号を返す。0 origin。
 	// コンストラクタで渡したthread_idが返ってくる。
@@ -196,15 +199,12 @@ private:
 	// Workerは、このthreadに割り当てて実行する。
 	NativeThread              stdThread;
 
-	// このスレッドおよび評価関数パラメーターが、どのNUMAに属するか。
-	NumaReplicatedAccessToken numaAccessToken;
-
 public:
-	// Legacy-accessible root data used by helper tools.
-	Position::EvaluatorStorageBinding rootEvaluatorStorageBinding;
-	Position                  rootPos;
-	StateInfo                 rootState;
-	Search::RootMoves         rootMoves;
+	// Thread-local search context. Kept public for existing helper-tool access.
+	Search::ThreadSearchContext searchContext{};
+	Position&                   rootPos = searchContext.rootState.rootPos;
+	StateInfo&                  rootState = searchContext.rootState.rootState;
+	Search::RootMoves&          rootMoves = searchContext.rootState.rootMoves;
 };
 
 // 思考で用いるスレッドの集合体

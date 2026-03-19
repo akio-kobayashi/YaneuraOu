@@ -28,7 +28,7 @@ Thread::Thread(
 	//nthreads(sharedState.options["Threads"]),
 	stdThread(&Thread::idle_loop, this)
 {
-	rootPos.set_evaluator_storage_binding(&rootEvaluatorStorageBinding);
+	searchContext.rootState.bind_evaluator_storage();
 
 #if !defined(__EMSCRIPTEN__)
 
@@ -41,9 +41,9 @@ Thread::Thread(
 		// スレッドを Worker 割り当ての前に NUMA ノードに（必要なら）バインドするために binder を使う。
         // 理想的にはここで SearchManager も割り当てたいが、それは些細なことだ。
 
-		this->numaAccessToken = binder();
+		this->searchContext.numaAccessToken = binder();
 		this->worker =
-			std::move(worker_factory(thread_id, this->numaAccessToken, this->rootPos, this->rootState, this->rootMoves));
+			std::move(worker_factory(thread_id, this->searchContext.numaAccessToken, this->root_search_context()));
 		});
 
 	// スレッドはsearching == trueで開始するので、このままworkerのほう待機状態にさせておく
@@ -80,6 +80,17 @@ Thread::~Thread() {
 	exit = true;
 	start_searching();
 	stdThread.join();
+}
+
+Search::RootSearchContext Thread::root_search_context() {
+	return searchContext.root_search_context();
+}
+
+void Thread::prepare_for_search(const Search::LimitsType& limits,
+                                const Position&           pos,
+                                const StateInfo&          rootStateSource,
+                                const Search::RootMoves&  rootMovesSource) {
+	worker->prepare_for_search(searchContext.rootState, limits, pos, rootStateSource, rootMovesSource);
 }
 
 // Wakes up the thread that will start the search
@@ -456,41 +467,7 @@ void ThreadPool::start_thinking(const OptionsMap&  options,
     for (auto&& th : threads)
     {
         th->run_custom_job([&]() {
-#if STOCKFISH
-            th->worker->limits = limits;
-            th->worker->nodes = th->worker->tbHits = th->worker->nmpMinPly =
-              th->worker->bestMoveChanges          = 0;
-            th->worker->rootDepth = th->worker->completedDepth = 0;
-            th->worker->rootMoves                              = rootMoves;
-            th->worker->rootPos.set(pos.fen(), pos.is_chess960(), &th->worker->rootState);
-            th->worker->rootState = setupStates->back();
-            th->worker->tbConfig  = tbConfig;
-#else
-
-            th->worker->limits = limits;
-            th->worker->nodes  = 0;
-#endif
-
-			// 📝 tbHits、tbConfigは将棋では使わない。
-
-#if STOCKFISH
-            th->worker->nmpMinPly = 0;
-			th->worker->bestMoveChanges = 0;
-            th->worker->rootDepth = th->worker->completedDepth = 0;
-
-            // 🤔 やねうら王では、Worker派生classのpre_start_searching()で行うようにする。
-            //     やねうら王では、void Search::YaneuraOuWorker::pre_start_searching()で行っている。
-#endif
-
-            th->worker->rootMoves = rootMoves;
-            th->worker->rootPos.set(pos.sfen(), &th->worker->rootState);
-            th->worker->rootState = setupStates->back();
-
-#if !STOCKFISH
-			// ⚠ どうせなら、↑でworker->rootPos.set()が終わってから呼び出したい。
-			//     (rootPosを使って入玉判定などを行いたいため)
-            th->worker->pre_start_searching();
-#endif
+			th->prepare_for_search(limits, pos, setupStates->back(), rootMoves);
 		});
     }
 

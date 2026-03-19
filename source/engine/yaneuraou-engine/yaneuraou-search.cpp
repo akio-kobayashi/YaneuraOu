@@ -381,13 +381,11 @@ void YaneuraOuEngine::resize_threads() {
 
     auto worker_factory = [&](size_t threadIdx,
                               NumaReplicatedAccessToken numaAccessToken,
-                              Position& rootPos,
-                              StateInfo& rootState,
-                              Search::RootMoves& rootMoves) {
+                              Search::RootSearchContext rootSearchContext) {
         return std::make_unique<Search::YaneuraOuWorker>(
 
 			// Worker基底classが渡して欲しいもの。
-			options, threads, threadIdx, numaAccessToken, rootPos, rootState, rootMoves,
+			options, threads, threadIdx, numaAccessToken, rootSearchContext,
 
 			// 追加でYaneuraOuEngineからもらいたいもの
 			tt, *this);
@@ -1000,12 +998,10 @@ Search::YaneuraOuWorker::YaneuraOuWorker(OptionsMap&               options,
                                          ThreadPool&               threads,
                                          size_t                    threadIdx,
                                          NumaReplicatedAccessToken numaAccessToken,
-                                         Position&                 rootPos,
-                                         StateInfo&                rootState,
-                                         RootMoves&                rootMoves,
+                                         RootSearchContext         rootSearchContext,
 										 TranspositionTable&       tt,
 										 YaneuraOuEngine&          engine) :
-    Search::Worker(options, threads, threadIdx, numaAccessToken, rootPos, rootState, rootMoves), tt(tt),
+    Search::Worker(options, threads, threadIdx, numaAccessToken, rootSearchContext), tt(tt),
 		engine(engine), manager(engine.manager) {
 
 #if defined(EVAL_SFNN)

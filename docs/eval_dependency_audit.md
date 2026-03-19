@@ -888,6 +888,158 @@ Verification note:
 - `make -C source tournament APPLE_CPU=native -j4` succeeds
 - the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
 
+### Slice 42: worker root inputs grouped into a thread-search context seam
+
+Implemented in:
+- [`search.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/search.h)
+- [`search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/search.cpp)
+- [`thread.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/thread.h)
+- [`thread.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/thread.cpp)
+- [`engine/yaneuraou-engine/yaneuraou-search.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.h)
+- [`engine/yaneuraou-engine/yaneuraou-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.cpp)
+
+Changed seam:
+- Worker construction now takes `Search::RootSearchContext` instead of three loose root references.
+- Thread-local root state is grouped under `Search::ThreadRootState`, which owns the root position, root state, root move list, and the evaluator binding needed for that root position.
+- Existing helper-tool access remains available through `Thread::rootPos`, `Thread::rootState`, and `Thread::rootMoves` aliases.
+
+Purpose:
+- start Phase D by making thread-local root search state explicit as a typed context object
+- prepare later ownership and locality work without changing active search behavior yet
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 43: root-position setup now reuses the thread-search context seam
+
+Implemented in:
+- [`thread.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/thread.h)
+- [`thread.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/thread.cpp)
+- [`search.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/search.h)
+
+Changed seam:
+- `Thread` now exposes `root_search_context()`, and `Worker` exposes the same typed root-context view for its bound root references.
+- `ThreadPool::start_thinking()` now initializes per-thread root state through `RootSearchContext` instead of separately updating `rootMoves`, `rootPos`, and `rootState`.
+
+Purpose:
+- keep the first Phase D thread-context seam consistent at both worker-construction time and root-position setup time
+- reduce more of the open-coded root-state choreography before ownership and locality moves begin
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 44: thread-root setup helpers move onto the thread-local root state
+
+Implemented in:
+- [`search.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/search.h)
+- [`thread.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/thread.cpp)
+
+Changed seam:
+- `Search::ThreadRootState` now owns `set_root_moves(...)` and `set_root_position(...)`.
+- `ThreadPool::start_thinking()` no longer open-codes root move copying plus `Position::set(...)` on worker-bound root references; it now delegates those steps to the thread-local root state object.
+
+Purpose:
+- continue turning `ThreadRootState` from a passive container into the typed seam for thread-local root setup
+- reduce more root-state setup choreography before Phase D starts moving hot state for locality/performance reasons
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 45: per-thread root-search preparation is now a single thread-root operation
+
+Implemented in:
+- [`search.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/search.h)
+- [`thread.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/thread.cpp)
+
+Changed seam:
+- `Search::ThreadRootState` now exposes `prepare_root_search(...)`.
+- `ThreadPool::start_thinking()` no longer sequences root-move copying and root-position reconstruction as separate calls; it delegates the full per-thread root-search setup step to the thread-local root state.
+
+Purpose:
+- further reduce duplicated root-state setup choreography inside `ThreadPool`
+- keep shaping a thread-context seam before Phase D starts moving hotter search state for locality reasons
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 46: thread-root binding hookup now lives on the thread-root state object
+
+Implemented in:
+- [`search.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/search.h)
+- [`thread.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/thread.cpp)
+
+Changed seam:
+- `Search::ThreadRootState` now exposes `bind_evaluator_storage()`.
+- `Thread` construction no longer directly reaches into `rootSearchState.rootPos` to attach the evaluator binding needed for the thread-local root position.
+
+Purpose:
+- continue moving thread-root initialization details onto the thread-local root-state seam
+- keep Phase D setup logic centered on a typed thread-context object before deeper locality work begins
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 47: per-thread search preparation now routes through Thread
+
+Implemented in:
+- [`thread.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/thread.h)
+- [`thread.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/thread.cpp)
+
+Changed seam:
+- `Thread` now exposes `prepare_for_search(...)`.
+- `ThreadPool::start_thinking()` no longer sequences worker-limit reset, root-state preparation, and pre-start hooks inline; it delegates the per-thread setup step to `Thread`.
+
+Purpose:
+- move more thread-local preparation logic out of the pool loop and onto the thread-side seam
+- set up a cleaner place to move hot search-thread state in later Phase D slices
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 48: worker-local search reset now runs through Worker
+
+Implemented in:
+- [`search.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/search.h)
+- [`search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/search.cpp)
+- [`thread.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/thread.cpp)
+
+Changed seam:
+- `Search::Worker` now exposes `prepare_for_search(...)` for the non-Stockfish path.
+- `Thread::prepare_for_search(...)` no longer resets worker-local state directly; it delegates the worker-local part of root-search preparation to `Worker`.
+
+Purpose:
+- move worker-local reset behavior closer to the worker that owns it
+- give Phase D a cleaner handoff point between thread-context setup and worker-local hot-state preparation
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 49: thread-local NUMA and root-search state grouped into a thread context
+
+Implemented in:
+- [`search.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/search.h)
+- [`thread.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/thread.h)
+- [`thread.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/thread.cpp)
+
+Changed seam:
+- `Search::ThreadSearchContext` now groups the thread's NUMA access token and thread-local root-search state.
+- `Thread` now keeps that thread-local state under one `searchContext` member instead of separate `numaAccessToken` and `rootSearchState` members.
+
+Purpose:
+- make the first actual thread-context object explicit for Phase D
+- prepare for later locality-oriented ownership moves by making thread-local search state visible as one grouped unit
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
 ## Non-Goals For The First Pass
 
 Do not start by:

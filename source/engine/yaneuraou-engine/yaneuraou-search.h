@@ -431,9 +431,7 @@ class YaneuraOuWorker: public Worker {
                     ThreadPool&               threads,
                     size_t                    threadIdx,
                     NumaReplicatedAccessToken numaAccessToken,
-                    Position&                 rootPos,
-                    StateInfo&                rootState,
-                    RootMoves&                rootMoves,
+                    RootSearchContext         rootSearchContext,
                     // 追加でYaneuraOuEngineからもらいたいもの
                     TranspositionTable& tt,
                     YaneuraOuEngine&    engine);
