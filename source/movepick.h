@@ -80,9 +80,6 @@ class MovePicker {
     void skip_quiet_moves();
 
    private:
-    template<typename Pred>
-    Move select(Pred);
-
     // 指し手のオーダリング用
     // GenType == CAPTURES : 捕獲する指し手のオーダリング
     // GenType == QUIETS   : 捕獲しない指し手のオーダリング
@@ -146,4 +143,3 @@ class MovePicker {
 
 #endif // defined(USE_MOVE_PICKER)
 #endif // #ifndef MOVEPICK_H_INCLUDED
-

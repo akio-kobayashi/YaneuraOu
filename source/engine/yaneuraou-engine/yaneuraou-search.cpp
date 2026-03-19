@@ -1905,7 +1905,8 @@ void Search::YaneuraOuWorker::iterative_deepening() {
                 // したがって、この出力を抑制し、以下でこのスレッドに対して
                 // （前回の反復から）証明済みのスコア／PVを選択する。
 
-                && !(threads.abortedSearch && is_loss(rootMoves[0].uciScore))
+                && !(threads.abortedSearch.load(std::memory_order_relaxed)
+                     && is_loss(rootMoves[0].uciScore))
 #if !STOCKFISH
                 // PVの出力間隔を超えている。
                 && search_options.lastPvInfoTime + search_options.computed_pv_interval <= now()
@@ -1936,7 +1937,8 @@ void Search::YaneuraOuWorker::iterative_deepening() {
         // このスレッドが探索を早期に停止した（中断探索）場合に備えて、
         // 証明されていない詰みスコアを選ばないように注意している。
 
-        if (threads.abortedSearch && rootMoves[0].score != -VALUE_INFINITE
+        if (threads.abortedSearch.load(std::memory_order_relaxed)
+            && rootMoves[0].score != -VALUE_INFINITE
             && is_loss(rootMoves[0].score))
         {
             // Bring the last best move to the front for best thread selection.
@@ -2021,7 +2023,9 @@ void Search::YaneuraOuWorker::iterative_deepening() {
         // Do we have time for the next iteration? Can we stop searching now?
         // 次の反復を行う時間はあるか？今すぐ探索を止められるか？
 #if STOCKFISH
-        if (limits.use_time_management() && !threads.stop && !mainThread->stopOnPonderhit)
+        if (limits.use_time_management()
+            && !threads.stop.load(std::memory_order_relaxed)
+            && !mainThread->stopOnPonderhit)
 #else
         // 📝 やねうら王の場合、search_endが設定されている時はもう終了が確定しているので
         //     この終了チェックを行うのは無駄である。

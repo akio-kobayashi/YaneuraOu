@@ -137,6 +137,7 @@ INCLUDE       = -I./src -I./include # -I../include
 # makeするときにCPPFLAGS,LDFLAGSを追加で指定したいときはこれを用いる。
 EXTRA_CPPFLAGS =
 EXTRA_LDFLAGS  =
+COMMA = ,
 
 CPPFLAGS += $(EXTRA_CPPFLAGS)
 LDFLAGS  += $(EXTRA_LDFLAGS)
@@ -664,7 +665,7 @@ OBJC_OBJECTS = $(addprefix $(OBJDIR)/, $(OBJC_SOURCES:.mm=.o))
 DEPENDS  = $(OBJECTS:.o=.d)
 
 all: clean $(TARGET)
-.PHONY : all normal evallearn tournament prof profgen profuse pgo clean
+.PHONY : all normal evallearn tournament profile_tournament prof profgen profuse pgo clean
 
 $(TARGET): $(OBJECTS) $(CUDA_OBJECTS) $(OBJC_OBJECTS)
 	$(COMPILER) -o $@ $^ $(LDFLAGS) $(CPPFLAGS) $(LIBS)
@@ -702,6 +703,11 @@ evallearn: run_python_script
 # トーナメント用
 tournament: run_python_script
 	$(MAKE) OBJDIR=../obj/tournament CPPFLAGS='$(CPPFLAGS) $(LTOFLAGS) -DFOR_TOURNAMENT' LDFLAGS='$(LDFLAGS) $(LTOFLAGS)' $(TARGET)
+
+# プロファイル用トーナメントビルド
+# 最適化は維持しつつ、strip を外して記号を残す。
+profile_tournament: run_python_script
+	$(MAKE) OBJDIR=../obj/profile_tournament CPPFLAGS='$(CPPFLAGS) $(LTOFLAGS) -DFOR_TOURNAMENT -g -fno-omit-frame-pointer' LDFLAGS='$(subst -Wl$(COMMA)-s,,$(LDFLAGS)) $(LTOFLAGS)' $(TARGET)
 
 #　とりあえずPGOはAVX2とSSE4.2専用
 prof:

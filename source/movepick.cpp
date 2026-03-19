@@ -429,26 +429,6 @@ ExtMove* MovePicker::score(MoveList<Type>& ml) {
     return it;
 }
 
-// Returns the next move satisfying a predicate function.
-// This never returns the TT move, as it was emitted before.
-
-// 条件を満たす次の手を返します。
-// この関数は、トランスポジションテーブル（TT）の手は既に出力されているため、決して返しません。
-
-// ※　この関数の返し値は同時にthis->moveにも格納されるので活用すると良い。filterのなかでも
-//   この変数にアクセスできるので、指し手によってfilterするかどうかを選べる。
-
-template<typename Pred>
-Move MovePicker::select(Pred filter) {
-
-	for (; cur < endCur; ++cur)
-		// filter()のなかで*curにアクセスして判定するのでfilter()は引数を取らない。
-		if (*cur != ttMove && filter())
-			return *cur++;
-
-	return Move::none();
-}
-
 // This is the most important method of the MovePicker class. We emit one
 // new pseudo-legal move on every call until there are no more moves left,
 // picking the move with the highest score from a list of generated moves.
@@ -512,15 +492,18 @@ top:
 	// 置換表の指し手を返したあとのフェーズ
 	// (killer moveの前のフェーズなのでkiller除去は不要)
 	case GOOD_CAPTURE:
-		if (select([&]() {
-				// moveは駒打ちではないからsee()の内部での駒打ちは判定不要だが…。
-				if (pos.see_ge(*cur, -cur->value / 18))
-					return true;
-				std::swap(*endBadCaptures++, *cur);
-				// 損をする捕獲する指し手はあとのほうで試行されるようにendBadCapturesに移動させる
-				return false;
-			}))
-			return *(cur - 1);
+		for (; cur < endCur; ++cur)
+		{
+			if (*cur == ttMove)
+				continue;
+
+			// moveは駒打ちではないからsee()の内部での駒打ちは判定不要だが…。
+			if (pos.see_ge(*cur, -cur->value / 18))
+				return *cur++;
+
+			std::swap(*endBadCaptures++, *cur);
+			// 損をする捕獲する指し手はあとのほうで試行されるようにendBadCapturesに移動させる
+		}
 
 		++stage;
 		[[fallthrough]];
@@ -617,8 +600,12 @@ top:
 		// (置換表の指し手とkillerの指し手は返したあとなのでこれらの指し手は除外する必要がある)
 		// ※　これ、指し手の数が多い場合、AVXを使って一気に削除しておいたほうが良いのでは..
 	case GOOD_QUIET:
-        if (!skipQuiets && select([&]() { return cur->value > goodQuietThreshold; }))
-            return *(cur - 1);
+        if (!skipQuiets)
+        {
+            for (; cur < endCur; ++cur)
+                if (*cur != ttMove && cur->value > goodQuietThreshold)
+                    return *cur++;
+        }
 
 		// Prepare the pointers to loop over the bad captures
 		// bad capturesの指し手を返すためにポインタを準備する。
@@ -632,8 +619,9 @@ top:
 
 		// see()が負の指し手を返す。
 	case BAD_CAPTURE:
-		if (select([]() { return true; }))
-			return *(cur - 1);
+		for (; cur < endCur; ++cur)
+			if (*cur != ttMove)
+				return *cur++;
 
 		// Prepare the pointers to loop over the bad quiets
 		// 悪いquietの手をループするためのポインタを準備します
@@ -646,7 +634,11 @@ top:
 
 	case BAD_QUIET:
 		if (!skipQuiets)
-            return select([&]() { return cur->value <= goodQuietThreshold; });
+		{
+            for (; cur < endCur; ++cur)
+                if (*cur != ttMove && cur->value <= goodQuietThreshold)
+                    return *cur++;
+		}
 
 		return Move::none();
 
@@ -683,11 +675,17 @@ top:
 		// 静止探索用の指し手を返す処理
 	case QCAPTURE:
 		// そんなに数は多くないはずだから、オーダリングがベストのスコアのものを選択する
-		return select([]() { return true; });
+        for (; cur < endCur; ++cur)
+            if (*cur != ttMove)
+                return *cur++;
+        return Move::none();
 
 		// PROBCUTの指し手を返す
 	case PROBCUT:
-		return select([&]() { return pos.see_ge(*cur, threshold); });
+        for (; cur < endCur; ++cur)
+            if (*cur != ttMove && pos.see_ge(*cur, threshold))
+                return *cur++;
+        return Move::none();
 		// threadshold以上のSEE値で、ベストのものを一つずつ返す
 
 	default:
