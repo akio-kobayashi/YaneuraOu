@@ -26,7 +26,7 @@ using namespace Eval;
 int Position::max_repetition_ply = 16;
 
 Position::~Position() {
-    active_evaluator_storage_binding()->release_all();
+    evaluatorStorageBindings.release_all();
 }
 
 void Position::EvaluatorStorage::reset() {
@@ -140,23 +140,6 @@ void Position::EvaluatorStorageBinding::release_all() {
     }
 }
 
-void Position::EvaluatorStorageBinding::bind_external(EvaluatorStorage* storage) {
-    ASSERT_LV3(storage);
-    reset_active();
-    if (active == owned)
-        active = nullptr;
-    active = storage;
-}
-
-void Position::EvaluatorStorageBinding::detach_external() {
-    if (!has_external())
-        return;
-
-    reset_active();
-    active = nullptr;
-    ensure_local();
-}
-
 Position::EvaluatorStorage* Position::EvaluatorStorageBinding::ensure_local() {
     if (!active)
     {
@@ -180,36 +163,35 @@ void Position::EvaluatorStorageBinding::clone_state(const StateInfo* previousSta
     ensure_local()->clone_state(previousState, state);
 }
 
-void Position::install_evaluator_storage_binding(EvaluatorStorageBinding* binding) {
-    evaluatorStorageBinding = binding;
+void Position::EvaluatorStorageBindingState::set_binding(EvaluatorStorageBinding* binding) {
+    active()->reset_active();
+    override = binding;
+    active()->ensure_local();
 }
 
-Position::EvaluatorStorageBinding* Position::prepare_evaluator_storage_binding_for_set() {
-    active_evaluator_storage_binding()->reset_active();
-    return evaluatorStorageBinding;
-}
-
-Position::EvaluatorStorageBinding* Position::resolve_evaluator_storage_binding(EvaluatorStorageBinding* binding) {
-    return binding ? binding : &localEvaluatorStorageBinding;
-}
-
-const Position::EvaluatorStorageBinding* Position::resolve_evaluator_storage_binding(const EvaluatorStorageBinding* binding) const {
-    return binding ? binding : &localEvaluatorStorageBinding;
+void Position::EvaluatorStorageBindingState::release_all() {
+    active()->release_all();
 }
 
 Position::EvaluatorStorageBinding* Position::active_evaluator_storage_binding() {
-    return resolve_evaluator_storage_binding(evaluatorStorageBinding);
+    return evaluatorStorageBindings.active();
 }
 
 const Position::EvaluatorStorageBinding* Position::active_evaluator_storage_binding() const {
-    return resolve_evaluator_storage_binding(evaluatorStorageBinding);
+    return evaluatorStorageBindings.active();
+}
+
+Position::EvaluatorStorageBinding* Position::installed_evaluator_storage_binding() {
+    return evaluatorStorageBindings.installed_override();
+}
+
+const Position::EvaluatorStorageBinding* Position::installed_evaluator_storage_binding() const {
+    return evaluatorStorageBindings.installed_override();
 }
 
 void Position::set_evaluator_storage_binding(EvaluatorStorageBinding* binding) {
 #if !STOCKFISH
-    active_evaluator_storage_binding()->reset_active();
-    install_evaluator_storage_binding(binding);
-    active_evaluator_storage_binding()->ensure_local();
+    evaluatorStorageBindings.set_binding(binding);
 #else
     (void) binding;
 #endif
@@ -606,7 +588,8 @@ void Position::set_state() const {
 
 // sfen文字列で盤面を設定する
 Position& Position::set(const std::string& sfen, StateInfo* si) {
-    auto* currentEvaluatorStorageBinding = prepare_evaluator_storage_binding_for_set();
+    auto* currentEvaluatorStorageBinding = installed_evaluator_storage_binding();
+    evaluatorStorageBindings.active()->reset_active();
 
 #if STOCKFISH
 

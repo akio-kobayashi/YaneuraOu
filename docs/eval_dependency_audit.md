@@ -743,6 +743,151 @@ Verification note:
 - `make -C source tournament APPLE_CPU=native -j4` succeeds
 - the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
 
+### Slice 34: unused transitional binding API removed
+
+Implemented in:
+- [`position.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.h)
+- [`position.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.cpp)
+
+Changed seam:
+- `EvaluatorStorageBinding` no longer exposes unused `has_external()`, `bind_external(...)`, or `detach_external()` helpers.
+- The remaining active compatibility surface is limited to reset, release, local materialization, state bind/clone, and eval-list access.
+
+Purpose:
+- reduce transitional API surface that no longer participates in the active Phase C path
+- make the binding object more closely reflect the ownership model actually in use
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 35: dedicated binding-install forwarding removed from Position
+
+Implemented in:
+- [`position.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.h)
+- [`position.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.cpp)
+
+Changed seam:
+- `Position` no longer keeps a separate `install_evaluator_storage_binding(...)` forwarding helper.
+- Active binding updates now happen directly in `set_evaluator_storage_binding(...)` and in the `set()` restore path.
+- This removes one more layer of ownership choreography that existed only to forward a pointer assignment.
+
+Purpose:
+- continue shrinking Phase C compatibility scaffolding inside `Position`
+- keep binding selection logic closer to the code paths that actually need it
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 36: thread teardown now relies on binding-seam destruction
+
+Implemented in:
+- [`thread.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/thread.cpp)
+
+Changed seam:
+- `Thread::~Thread()` no longer switches `rootPos` back to a local binding explicitly.
+- Root-position cleanup now relies on the normal `Position` destruction path and the binding seam already in place there.
+
+Purpose:
+- reduce thread-side ownership choreography that existed only to pre-detach evaluator binding state
+- keep Phase C moving by letting destruction follow the same seam used during the active path
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 37: Position::set restore path now reuses the normal binding entry point
+
+Implemented in:
+- [`position.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.cpp)
+
+Changed seam:
+- `Position::set()` no longer restores binding state by assigning `evaluatorStorageBinding` directly.
+- The post-`memset` restore path now reuses `set_evaluator_storage_binding(...)`, matching the active-path entry point used elsewhere.
+
+Purpose:
+- reduce special-case binding choreography in the reset path
+- keep Phase C converging on a single binding-selection entry point
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 38: one-off set-preparation helper removed
+
+Implemented in:
+- [`position.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.h)
+- [`position.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.cpp)
+
+Changed seam:
+- `Position` no longer keeps a dedicated `prepare_evaluator_storage_binding_for_set()` helper.
+- `set()` now directly snapshots the canonical override pointer, resets the active binding seam, and later reuses `set_evaluator_storage_binding(...)` for restoration.
+
+Purpose:
+- remove another one-off compatibility helper from the remaining Phase C reset path
+- make the `set()` ownership flow easier to follow with fewer private seams
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 39: fallback resolution folded into the active binding accessor
+
+Implemented in:
+- [`position.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.h)
+- [`position.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.cpp)
+
+Changed seam:
+- `Position` no longer keeps separate `resolve_evaluator_storage_binding(...)` helpers.
+- Local-fallback resolution now happens directly inside `active_evaluator_storage_binding()`.
+- This removes another helper layer that only forwarded a null-to-local fallback decision.
+
+Purpose:
+- continue collapsing thin compatibility wrappers around the binding seam
+- keep the remaining Phase C ownership logic concentrated in fewer places
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 40: raw binding-override access moved behind a named seam
+
+Implemented in:
+- [`position.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.h)
+- [`position.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.cpp)
+
+Changed seam:
+- `Position` now routes reads and writes of the raw external binding override through `external_evaluator_storage_binding()`.
+- The active-binding accessor and `set()` snapshot path no longer touch the compatibility pointer member directly.
+
+Purpose:
+- keep the remaining binding-state choreography concentrated behind named seams
+- make later ownership moves less dependent on the current raw member layout
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 41: binding-policy state grouped outside Position's raw members
+
+Implemented in:
+- [`position.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.h)
+- [`position.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.cpp)
+
+Changed seam:
+- `Position` no longer keeps separate raw members for the local binding object and the external binding override.
+- That compatibility state now lives in `EvaluatorStorageBindingState`, which owns local fallback materialization, override installation, active-binding selection, and release.
+- `Position` now delegates binding installation and reset-path snapshots through that state object.
+
+Purpose:
+- finish the first-pass ownership relocation by moving the remaining binding-policy choreography out of `Position`'s data layout
+- leave Phase D to focus on broader thread-context and NUMA ownership instead of more evaluator-storage compatibility cleanup
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
 ## Non-Goals For The First Pass
 
 Do not start by:

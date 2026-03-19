@@ -1119,11 +1119,8 @@ public:
         EvaluatorStorage* owned = nullptr;
         EvaluatorStorage* active = nullptr;
 
-        bool has_external() const { return active && active != owned; }
         void reset_active();
         void release_all();
-        void bind_external(EvaluatorStorage* storage);
-        void detach_external();
         EvaluatorStorage* ensure_local();
         const EvaluatorStorage* current() const;
 
@@ -1134,6 +1131,19 @@ public:
 
         void bind_state(StateInfo* state);
         void clone_state(const StateInfo* previousState, StateInfo* state);
+    };
+
+    struct EvaluatorStorageBindingState {
+        EvaluatorStorageBinding  local{};
+        EvaluatorStorageBinding* override = nullptr;
+
+        EvaluatorStorageBinding*       active() { return override ? override : &local; }
+        const EvaluatorStorageBinding* active() const { return override ? override : &local; }
+        EvaluatorStorageBinding*       installed_override() { return override; }
+        const EvaluatorStorageBinding* installed_override() const { return override; }
+
+        void set_binding(EvaluatorStorageBinding* binding);
+        void release_all();
     };
 
     void set_evaluator_storage_binding(EvaluatorStorageBinding* binding);
@@ -1148,12 +1158,10 @@ private:
 
 	// StateInfoの初期化。Position::set()のタイミングで行われる。
 	void set_state() const;
-    EvaluatorStorageBinding* resolve_evaluator_storage_binding(EvaluatorStorageBinding* binding);
-    const EvaluatorStorageBinding* resolve_evaluator_storage_binding(const EvaluatorStorageBinding* binding) const;
-    void install_evaluator_storage_binding(EvaluatorStorageBinding* binding);
-    EvaluatorStorageBinding* prepare_evaluator_storage_binding_for_set();
     EvaluatorStorageBinding* active_evaluator_storage_binding();
     const EvaluatorStorageBinding* active_evaluator_storage_binding() const;
+    EvaluatorStorageBinding* installed_evaluator_storage_binding();
+    const EvaluatorStorageBinding* installed_evaluator_storage_binding() const;
 
 #if STOCKFISH
     void set_check_info() const;
@@ -1283,8 +1291,7 @@ private:
 
     // Phase C compatibility layer: evaluator storage ownership can now live
     // outside Position, while non-search callers still get a local fallback.
-    EvaluatorStorageBinding  localEvaluatorStorageBinding{};
-    EvaluatorStorageBinding* evaluatorStorageBinding = nullptr;
+    EvaluatorStorageBindingState evaluatorStorageBindings{};
 
 #endif
 };

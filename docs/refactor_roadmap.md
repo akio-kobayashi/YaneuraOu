@@ -204,7 +204,7 @@ Current status:
 - Verify each storage move with a full clean rebuild before proceeding.
 
 Current status:
-- The first Phase C slice is now in progress: classic NNUE accumulator storage is no longer embedded in `StateInfo` for active code paths.
+- Phase C is complete for active code paths.
 - `StateInfo` now keeps only an NNUE sidecar pointer, while `Position` owns the accumulator slot list and binds fresh storage on `set()`, `do_move()`, and `do_null_move()`.
 - Existing `Position` accumulator accessors remain the compatibility layer, so evaluator and feature-transformer call sites do not depend on the storage move.
 - `do_null_move()` explicitly clones the previous accumulator state before invalidating the score cache so null-move reuse semantics stay unchanged.
@@ -228,6 +228,14 @@ Current status:
 - `Position::set()` no longer open-codes evaluator-binding reset/restore choreography; that reset boundary now lives behind dedicated helpers.
 - `Position` now treats a null binding pointer as the canonical local-fallback state, with resolution handled by a dedicated seam instead of by storing the local binding pointer directly.
 - `Position::set()` now preserves that canonical null-versus-external binding form across `memset`, instead of restoring the resolved local binding object pointer.
+- Unused transitional bind/detach helpers have been removed from `EvaluatorStorageBinding`, tightening the active compatibility surface around the paths still in use.
+- The dedicated binding-install helper has also been removed from `Position`, leaving fewer forwarding layers between binding selection and the active path.
+- `Thread` teardown no longer switches `rootPos` back to local storage explicitly; cleanup now relies on the existing binding seam during normal destruction.
+- `Position::set()` now restores evaluator-binding state through the same `set_evaluator_storage_binding(...)` entry point used elsewhere, removing one more direct member update from the reset path.
+- The dedicated `prepare_evaluator_storage_binding_for_set()` helper has also been removed, leaving the reset path with fewer one-off compatibility helpers.
+- Fallback resolution is now folded directly into the active binding accessor, removing another thin forwarding helper from `Position`.
+- Raw evaluator-binding override access is now routed through a named accessor as well, leaving fewer direct touches of the compatibility pointer state inside `Position`.
+- The remaining local-versus-external binding policy is now grouped under `EvaluatorStorageBindingState`, so `Position` no longer owns separate local and override members for evaluator-storage compatibility state.
 - The build target mismatch that previously mixed `normal` and `tournament` object files is also fixed by splitting object directories per target, so clean tournament rebuilds and short USI search runs now succeed again.
 
 ### Phase D: Restructure search/eval state

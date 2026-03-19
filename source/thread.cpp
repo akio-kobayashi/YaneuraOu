@@ -80,7 +80,6 @@ Thread::~Thread() {
 	exit = true;
 	start_searching();
 	stdThread.join();
-	rootPos.set_evaluator_storage_binding(nullptr);
 }
 
 // Wakes up the thread that will start the search
