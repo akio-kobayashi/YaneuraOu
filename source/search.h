@@ -136,10 +136,6 @@ struct ThreadRootState {
         rootPos.set_evaluator_storage_binding(&evaluatorStorageBinding);
     }
 
-    RootSearchContext root_search_context() {
-        return {rootPos, rootState, rootMoves};
-    }
-
     void set_root_moves(const RootMoves& moves) {
         rootMoves = moves;
     }
@@ -166,8 +162,36 @@ struct ThreadSearchContext {
     NumaReplicatedAccessToken numaAccessToken;
     ThreadRootState           rootState;
 
+    Position& root_pos() {
+        return rootState.rootPos;
+    }
+
+    StateInfo& root_state() {
+        return rootState.rootState;
+    }
+
+    RootMoves& root_moves() {
+        return rootState.rootMoves;
+    }
+
+    void bind_evaluator_storage() {
+        rootState.bind_evaluator_storage();
+    }
+
+    void install_numa_access_token(NumaReplicatedAccessToken token) {
+        numaAccessToken = token;
+    }
+
+    NumaReplicatedAccessToken numa_access_token() const {
+        return numaAccessToken;
+    }
+
     RootSearchContext root_search_context() {
-        return rootState.root_search_context();
+        return {root_pos(), root_state(), root_moves()};
+    }
+
+    void prepare_root_search(const Position& position, const StateInfo& state, const RootMoves& moves) {
+        rootState.prepare_root_search(position, state, moves);
     }
 };
 
@@ -363,21 +387,16 @@ struct UpdateContext {
 class Worker;
 typedef std::function<std::unique_ptr<Worker>(size_t /*threadIdx*/,
                                               NumaReplicatedAccessToken /*numaAccessToken*/,
-                                              RootSearchContext /*rootSearchContext*/)> WorkerFactory;
+                                              ThreadSearchContext& /*threadSearchContext*/)> WorkerFactory;
 
 class Worker
 {
 public:
-
-    RootSearchContext root_search_context() {
-        return {rootPos, rootState, rootMoves};
-    }
-
 	Worker(OptionsMap& options,
            ThreadPool& threads,
            size_t threadIdx,
            NumaReplicatedAccessToken numaAccessToken,
-           RootSearchContext rootSearchContext);
+           ThreadSearchContext& threadSearchContext);
 
 	// Called at instantiation to initialize reductions tables.
     // Reset histories, usually before a new game.
@@ -412,7 +431,7 @@ public:
 	*/
 	virtual void pre_start_searching() {}
 
-	void prepare_for_search(ThreadRootState&      rootSearchState,
+	void prepare_for_search(ThreadSearchContext&  threadSearchContext,
 	                        const LimitsType&     limits,
 	                        const Position&       rootPosition,
 	                        const StateInfo&      rootStateSource,

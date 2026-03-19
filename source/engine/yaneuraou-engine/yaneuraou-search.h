@@ -425,13 +425,25 @@ struct EvaluationContext {
 // 💡 このclassのコードは、Stockfishのsearch.hにあるWorker classを参考にすること。
 class YaneuraOuWorker: public Worker {
    public:
+    struct SearchRuntimeState {
+        size_t               pvIdx = 0;
+        size_t               pvLast = 0;
+        std::atomic<uint64_t> bestMoveChanges{0};
+        int                  selDepth = 0;
+        int                  nmpMinPly = 0;
+        Depth                rootDepth = 0;
+        Depth                completedDepth = 0;
+        Value                rootDelta = VALUE_ZERO;
+        Value                optimism[COLOR_NB] = {VALUE_ZERO, VALUE_ZERO};
+    };
+
     // 💡 コンストラクタでWorkerのコンストラクタを初期化しないといけないので、
     //     少なくともWorkerのコンストラクタと同じ引数が必要。
     YaneuraOuWorker(OptionsMap&               options,
                     ThreadPool&               threads,
                     size_t                    threadIdx,
                     NumaReplicatedAccessToken numaAccessToken,
-                    RootSearchContext         rootSearchContext,
+                    ThreadSearchContext&      threadSearchContext,
                     // 追加でYaneuraOuEngineからもらいたいもの
                     TranspositionTable& tt,
                     YaneuraOuEngine&    engine);
@@ -479,6 +491,7 @@ class YaneuraOuWorker: public Worker {
     // 💡 並列探索のentry point。
     //     start_searching()から呼び出される。
     void iterative_deepening();
+    void reset_search_runtime_state();
 
     // 📌 do_move～undo_move
     // 📝 do_move()は、Worker::nodesをインクリメントする。
@@ -545,20 +558,15 @@ class YaneuraOuWorker: public Worker {
 	// 💡 やねうら王ではbase classが持っている。
     //LimitsType limits;
 
-    // MultiPVの時の現在探索中のPVのindexと、PVの末尾
-    size_t pvIdx, pvLast;
-
     // nodes           : 探索node数これはbase classのほうにある。
     // tbHits          : tablebaseにhitした回数。将棋では使わない。
-    // bestMoveChanges : bestMoveが反復深化のなかで変化した回数
-    std::atomic<uint64_t> /* nodes, tbHits,*/ bestMoveChanges;
-
-    // selDepth : 選択探索の深さ。
-    // 💡depthとPV lineに対するUSI infoで出力するselDepth。
-    int selDepth, nmpMinPly;
-
-	// 探索時に評価値に楽観的バイアスを与えるために用いるパラメーター。
-	Value optimism[COLOR_NB];
+    SearchRuntimeState runtimeState;
+    size_t&             pvIdx = runtimeState.pvIdx;
+    size_t&             pvLast = runtimeState.pvLast;
+    int&                selDepth = runtimeState.selDepth;
+    int&                nmpMinPly = runtimeState.nmpMinPly;
+    Depth&              rootDepth = runtimeState.rootDepth;
+    Depth&              completedDepth = runtimeState.completedDepth;
 
 #if STOCKFISH
 	// 探索開始局面とrootでのStateInfo
@@ -570,10 +578,6 @@ class YaneuraOuWorker: public Worker {
 	// 📝 やねうら王では、base classが持っている。
     RootMoves rootMoves;
 #endif
-
-    // aspiration searchで使う。
-    Depth rootDepth, completedDepth;
-    Value rootDelta;
 
     // Transitional wrapper around evaluation entry points.
     // Ownership still lives in the current evaluator / Position machinery.

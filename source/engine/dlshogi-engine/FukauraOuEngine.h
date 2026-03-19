@@ -29,9 +29,7 @@ class FukauraOuWorker : public YaneuraOu::Search::Worker {
                     ThreadPool&               threads,
                     size_t                    threadIdx,
                     NumaReplicatedAccessToken numaAccessToken,
-                    Position&                 rootPos,
-                    StateInfo&                rootState,
-                    Search::RootMoves&        rootMoves,
+                    Search::ThreadSearchContext& threadSearchContext,
                     DlshogiSearcher&          searcher,
                     FukauraOuEngine&          engine);
 

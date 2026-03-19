@@ -1040,6 +1040,304 @@ Verification note:
 - `make -C source tournament APPLE_CPU=native -j4` succeeds
 - the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
 
+### Slice 50: thread-context object now owns basic thread-local setup hooks
+
+Implemented in:
+- [`search.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/search.h)
+- [`thread.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/thread.cpp)
+
+Changed seam:
+- `Search::ThreadSearchContext` now exposes `bind_evaluator_storage()` and `install_numa_access_token(...)`.
+- `Thread` construction no longer directly updates the grouped thread-local members for root binding and NUMA token installation.
+
+Purpose:
+- continue turning the new thread-context object into the owner of thread-local setup mechanics
+- reduce direct field-level manipulation before Phase D moves to hotter state and locality concerns
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 51: worker preparation now takes the full thread-search context
+
+Implemented in:
+- [`search.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/search.h)
+- [`search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/search.cpp)
+- [`thread.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/thread.cpp)
+
+Changed seam:
+- `Worker::prepare_for_search(...)` now accepts `ThreadSearchContext&` instead of only `ThreadRootState&`.
+- `Thread::prepare_for_search(...)` therefore hands the grouped thread-local context across the thread/worker seam, not just the root-state subset.
+
+Purpose:
+- make `ThreadSearchContext` the actual typed handoff unit between thread-side setup and worker-local preparation
+- prepare later Phase D slices to move more hot thread-local state without expanding function signatures again
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 52: thread constructor now reads NUMA state back through the thread context
+
+Implemented in:
+- [`search.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/search.h)
+- [`thread.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/thread.cpp)
+
+Changed seam:
+- `ThreadSearchContext` now exposes `numa_access_token()`.
+- `Thread` construction no longer reads the grouped NUMA token member directly when handing the token to the worker factory.
+
+Purpose:
+- continue trimming direct field-level interaction with the grouped thread-local context
+- keep the Phase D thread-context object as the explicit seam for later locality-oriented changes
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 53: thread-context object now exposes root-state accessors
+
+Implemented in:
+- [`search.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/search.h)
+- [`thread.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/thread.h)
+
+Changed seam:
+- `ThreadSearchContext` now exposes `root_pos()`, `root_state()`, and `root_moves()`.
+- The legacy `Thread::rootPos`, `Thread::rootState`, and `Thread::rootMoves` aliases now bind through those accessors instead of directly naming the nested `rootState` storage layout.
+
+Purpose:
+- continue reducing direct awareness of nested thread-local storage layout
+- keep the thread-context object as the primary seam before Phase D shifts to hotter locality-sensitive state
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 54: worker factory now takes the full thread-search context
+
+Implemented in:
+- [`thread.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/thread.h)
+- [`thread.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/thread.cpp)
+- [`engine.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine.cpp)
+- [`yaneuraou-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.cpp)
+- [`user-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/user-engine/user-search.cpp)
+- [`dlshogi_searcher.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/dlshogi-engine/dlshogi_searcher.cpp)
+- [`yaneuraou-mate-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-mate-engine/yaneuraou-mate-search.cpp)
+- [`tanuki-mate-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/tanuki-mate-engine/tanuki-mate-search.cpp)
+
+Changed seam:
+- `Search::WorkerFactory` now receives `ThreadSearchContext&` instead of a bare `RootSearchContext`.
+- Worker creation sites derive root-position/state/move access through the thread-context seam instead of threading those references around as the factory boundary type.
+
+Purpose:
+- make the Phase D thread-context object the primary typed handoff at worker creation time, not just during later per-search preparation
+- reduce the number of places that still treat root search state as the only meaningful thread-local unit
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 55: thread wrapper no longer exposes a root-only search-context API
+
+Implemented in:
+- [`thread.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/thread.h)
+- [`thread.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/thread.cpp)
+
+Changed seam:
+- `Thread::root_search_context()` has been removed.
+- The root-only compatibility view remains available on `ThreadSearchContext`, which is now the typed handoff object for both worker creation and per-search preparation.
+
+Purpose:
+- trim another compatibility wrapper from `Thread`
+- keep Phase D's thread-context object, rather than `Thread` itself, as the primary seam for root-search state handoff
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 56: worker constructors now take the full thread-search context
+
+Implemented in:
+- [`search.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/search.h)
+- [`search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/search.cpp)
+- [`yaneuraou-search.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.h)
+- [`yaneuraou-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.cpp)
+- [`user-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/user-engine/user-search.cpp)
+- [`FukauraOuEngine.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/dlshogi-engine/FukauraOuEngine.h)
+- [`FukauraOuEngine.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/dlshogi-engine/FukauraOuEngine.cpp)
+- [`dlshogi_searcher.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/dlshogi-engine/dlshogi_searcher.cpp)
+- [`yaneuraou-mate-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-mate-engine/yaneuraou-mate-search.cpp)
+- [`tanuki-mate-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/tanuki-mate-engine/tanuki-mate-search.cpp)
+
+Changed seam:
+- `Search::Worker` now takes `ThreadSearchContext&` instead of `RootSearchContext`.
+- Derived worker constructors and worker-factory call sites now forward the full thread-search context rather than unpacking root-position/state/move references at the factory boundary.
+
+Purpose:
+- push the grouped thread-local context one step deeper into worker construction
+- reduce another root-only compatibility seam before locality-oriented Phase D work starts moving hotter per-thread state
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 57: worker objects no longer expose an unused root-only view
+
+Implemented in:
+- [`search.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/search.h)
+
+Changed seam:
+- `Worker::root_search_context()` has been removed.
+
+Purpose:
+- trim another unused root-only compatibility API
+- keep the remaining root-state compatibility view centered on `ThreadSearchContext`, not on worker instances
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 58: root-only compatibility view now lives only on ThreadSearchContext
+
+Implemented in:
+- [`search.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/search.h)
+
+Changed seam:
+- `ThreadRootState::root_search_context()` has been removed as unused.
+- The grouped thread-local state still exposes a root-only compatibility view, but only through `ThreadSearchContext`.
+
+Purpose:
+- remove another redundant wrapper in the thread-context layering
+- keep the compatibility seam concentrated at the outer thread-context object instead of duplicating it on inner storage structs
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 59: thread root-state accessor methods now front selected helper paths
+
+Implemented in:
+- [`thread.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/thread.h)
+- [`makebook2015.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/book/makebook2015.cpp)
+- [`learner.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/learn/learner.cpp)
+
+Changed seam:
+- `Thread` now exposes `root_pos()`, `root_state()`, and `root_moves()`.
+- Helper-tool and learner call sites have started moving from direct `rootPos/rootState/rootMoves` alias access to the named thread accessors.
+
+Purpose:
+- keep shrinking direct awareness of the legacy root-state alias layout on `Thread`
+- prepare a later Phase D slice that can remove or further demote those compatibility aliases
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 60: search-runtime reset is now a named hot-path seam
+
+Implemented in:
+- [`yaneuraou-search.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.h)
+- [`yaneuraou-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.cpp)
+
+Changed seam:
+- `YaneuraOuWorker` now resets `nmpMinPly`, `bestMoveChanges`, `rootDepth`, and `completedDepth` through `reset_search_runtime_state()`.
+
+Purpose:
+- centralize the per-search hot runtime reset before Phase D moves that state into a tighter thread-context or worker-runtime grouping
+- reduce one more open-coded initialization block on the tournament search path
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 61: YaneuraOu worker hot runtime state is now grouped
+
+Implemented in:
+- [`yaneuraou-search.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.h)
+
+Changed seam:
+- `YaneuraOuWorker` now stores `pvIdx`, `pvLast`, `bestMoveChanges`, `selDepth`, `nmpMinPly`, `rootDepth`, `completedDepth`, and `rootDelta` under `SearchRuntimeState`.
+- Compatibility references preserve existing call sites while establishing a single storage boundary for those hot per-search fields.
+
+Purpose:
+- create a tighter storage unit for search-runtime hot state before moving it closer to thread-context ownership
+- reduce the cost of later locality-oriented changes by grouping the fields now without changing behavior
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 62: optimism is now part of the grouped search runtime state
+
+Implemented in:
+- [`yaneuraou-search.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.h)
+
+Changed seam:
+- `optimism[COLOR_NB]` now lives inside `SearchRuntimeState`.
+- Existing call sites continue to use the same name through a compatibility pointer while the grouped runtime block is being established.
+
+Purpose:
+- keep moving per-search hot state into one storage unit
+- make later locality-oriented relocation simpler by reducing fields that still sit outside the grouped runtime block
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 63: tournament search path now uses grouped runtime optimism directly
+
+Implemented in:
+- [`yaneuraou-search.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.h)
+- [`yaneuraou-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.cpp)
+
+Changed seam:
+- The compatibility `optimism` pointer has been removed.
+- Tournament-search writes and evaluation reads now reference `runtimeState.optimism[...]` directly.
+
+Purpose:
+- start turning `SearchRuntimeState` into the actual hot-path storage, not only a passive grouping shell
+- reduce one more compatibility layer before moving more runtime fields behind the grouped block
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 64: best-move change tracking now uses grouped runtime state directly
+
+Implemented in:
+- [`yaneuraou-search.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.h)
+- [`yaneuraou-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.cpp)
+
+Changed seam:
+- The compatibility `bestMoveChanges` reference has been removed.
+- Runtime reset, thread aggregation, and update sites now access `runtimeState.bestMoveChanges` directly.
+
+Purpose:
+- continue turning `SearchRuntimeState` into the real storage used by the tournament search path
+- reduce another compatibility alias before moving more runtime fields behind the grouped block
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 65: aspiration-window delta now uses grouped runtime state directly
+
+Implemented in:
+- [`yaneuraou-search.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.h)
+- [`yaneuraou-search.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/engine/yaneuraou-engine/yaneuraou-search.cpp)
+
+Changed seam:
+- The compatibility `rootDelta` reference has been removed.
+- Aspiration-window update and reduction calculation now access `runtimeState.rootDelta` directly.
+
+Purpose:
+- continue replacing compatibility aliases with direct grouped-runtime access on the tournament search path
+- keep the aspiration-window bookkeeping inside the same relocatable runtime block as the other hot search fields
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
 ## Non-Goals For The First Pass
 
 Do not start by:

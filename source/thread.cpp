@@ -28,7 +28,7 @@ Thread::Thread(
 	//nthreads(sharedState.options["Threads"]),
 	stdThread(&Thread::idle_loop, this)
 {
-	searchContext.rootState.bind_evaluator_storage();
+	searchContext.bind_evaluator_storage();
 
 #if !defined(__EMSCRIPTEN__)
 
@@ -41,9 +41,9 @@ Thread::Thread(
 		// スレッドを Worker 割り当ての前に NUMA ノードに（必要なら）バインドするために binder を使う。
         // 理想的にはここで SearchManager も割り当てたいが、それは些細なことだ。
 
-		this->searchContext.numaAccessToken = binder();
+		this->searchContext.install_numa_access_token(binder());
 		this->worker =
-			std::move(worker_factory(thread_id, this->searchContext.numaAccessToken, this->root_search_context()));
+			std::move(worker_factory(thread_id, this->searchContext.numa_access_token(), this->searchContext));
 		});
 
 	// スレッドはsearching == trueで開始するので、このままworkerのほう待機状態にさせておく
@@ -82,15 +82,11 @@ Thread::~Thread() {
 	stdThread.join();
 }
 
-Search::RootSearchContext Thread::root_search_context() {
-	return searchContext.root_search_context();
-}
-
 void Thread::prepare_for_search(const Search::LimitsType& limits,
                                 const Position&           pos,
                                 const StateInfo&          rootStateSource,
                                 const Search::RootMoves&  rootMovesSource) {
-	worker->prepare_for_search(searchContext.rootState, limits, pos, rootStateSource, rootMovesSource);
+	worker->prepare_for_search(searchContext, limits, pos, rootStateSource, rootMovesSource);
 }
 
 // Wakes up the thread that will start the search

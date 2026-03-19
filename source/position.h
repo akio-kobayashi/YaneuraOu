@@ -130,6 +130,12 @@ struct StateInfo {
 
 #endif
 
+#if defined(USE_PIECE_VALUE) || (defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(USE_EVAL_LIST)))
+	// Phase C: preserve the per-StateInfo classic-eval sidecar across the
+	// partial memcpy used by do_move().
+	struct ClassicEvalState* classicEvalStateCache = nullptr;
+#endif
+
 	// 現局面で手番側に対して王手をしている駒のbitboard
 	Bitboard checkersBB;
 
@@ -196,17 +202,15 @@ struct StateInfo {
 #if defined(USE_PIECE_VALUE)
 	// Phase C: classic evaluator state is moved out of StateInfo.
 	// StateInfo keeps only a sidecar pointer while Position owns the slots.
-	struct ClassicEvalState* classicEvalState;
+	struct ClassicEvalState* classicEvalState = nullptr;
 #elif defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(USE_EVAL_LIST))
-	struct ClassicEvalState* classicEvalState;
+	struct ClassicEvalState* classicEvalState = nullptr;
 #endif
 
 #if defined(USE_CLASSIC_EVAL)
 
 #if defined(EVAL_NNUE)
-	// Phase C: NNUE accumulator storage is moved out of StateInfo.
-	// StateInfo keeps only a sidecar pointer while Position owns the slots.
-	Eval::NNUE::Accumulator* nnueAccumulator;
+	Eval::NNUE::Accumulator nnueAccumulator;
 #endif
 
 #if defined(KEEP_LAST_MOVE)
@@ -813,18 +817,18 @@ public:
     StateInfo* state() const { return st; }
 
 #if defined(EVAL_NNUE)
-    Eval::NNUE::Accumulator& nnue_accumulator() { return *st->nnueAccumulator; }
-    const Eval::NNUE::Accumulator& nnue_accumulator() const { return *st->nnueAccumulator; }
-    Eval::NNUE::Accumulator& mutable_nnue_accumulator() const { return *st->nnueAccumulator; }
+    Eval::NNUE::Accumulator& nnue_accumulator() { return st->nnueAccumulator; }
+    const Eval::NNUE::Accumulator& nnue_accumulator() const { return st->nnueAccumulator; }
+    Eval::NNUE::Accumulator& mutable_nnue_accumulator() const { return st->nnueAccumulator; }
     const Eval::NNUE::Accumulator* previous_nnue_accumulator() const {
-        return st->previous ? st->previous->nnueAccumulator : nullptr;
+        return st->previous ? &st->previous->nnueAccumulator : nullptr;
     }
     void invalidate_nnue_accumulator() {
-        auto& accumulator = *st->nnueAccumulator;
+        auto& accumulator = st->nnueAccumulator;
         accumulator.computed_accumulation = false;
         accumulator.computed_score        = false;
     }
-    void invalidate_nnue_score() { st->nnueAccumulator->computed_score = false; }
+    void invalidate_nnue_score() { st->nnueAccumulator.computed_score = false; }
 #endif
 
 #if defined(USE_EVAL_LIST)
@@ -1063,19 +1067,16 @@ public:
 	static void UnitTest(Test::UnitTester& tester, IEngine& engine);
 
 public:
-#if defined(EVAL_NNUE)
-    struct NnueAccumulatorSlot {
-        StateInfo*              owner = nullptr;
-        Eval::NNUE::Accumulator accumulator{};
-        NnueAccumulatorSlot*    next = nullptr;
-    };
-#endif
-
 #if defined(USE_PIECE_VALUE) || (defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(USE_EVAL_LIST)))
     struct ClassicEvalStateSlot {
-        StateInfo*             owner = nullptr;
-        ClassicEvalState       state{};
-        ClassicEvalStateSlot*  next = nullptr;
+        ClassicEvalState state{};
+    };
+
+    struct ClassicEvalStateBlock {
+        static constexpr size_t Capacity = 64;
+        ClassicEvalStateSlot    slots[Capacity]{};
+        size_t                  used = 0;
+        ClassicEvalStateBlock*  next = nullptr;
     };
 #endif
 
@@ -1086,11 +1087,8 @@ public:
 #endif
 
     struct EvaluatorStorage {
-#if defined(EVAL_NNUE)
-        NnueAccumulatorSlot* nnueAccumulatorSlots = nullptr;
-#endif
 #if defined(USE_PIECE_VALUE) || (defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(USE_EVAL_LIST)))
-        ClassicEvalStateSlot* classicEvalStateSlots = nullptr;
+        ClassicEvalStateBlock* classicEvalStateBlocks = nullptr;
 #endif
 #if defined(USE_EVAL_LIST)
         EvalListSidecar evalListSidecar{};
@@ -1105,10 +1103,6 @@ public:
 
 #if defined(USE_PIECE_VALUE) || (defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(USE_EVAL_LIST)))
         ClassicEvalState* bind_classic_eval_state(StateInfo* state);
-#endif
-
-#if defined(EVAL_NNUE)
-        Eval::NNUE::Accumulator* bind_nnue_accumulator(StateInfo* state);
 #endif
 
         void bind_state(StateInfo* state);

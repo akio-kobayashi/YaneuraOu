@@ -980,12 +980,10 @@ public:
                     ThreadPool& threads,
                     size_t threadIdx,
                     NumaReplicatedAccessToken numaAccessToken,
-                    Position& rootPos,
-                    StateInfo& rootState,
-                    Search::RootMoves& rootMoves,
+                    Search::ThreadSearchContext& threadSearchContext,
                     TanukiMate::TanukiMateClass& mateClass) :
 		// 基底classのconstructorの呼び出し
-		Worker(options, threads, threadIdx, numaAccessToken, rootPos, rootState, rootMoves), mateClass(mateClass) {
+		Worker(options, threads, threadIdx, numaAccessToken, threadSearchContext), mateClass(mateClass) {
 			
 	}
 
@@ -1084,11 +1082,9 @@ public:
 		//      あなたの作成したWorker派生classの名前を書きます。
 		auto worker_factory = [&](size_t threadIdx,
                                   NumaReplicatedAccessToken numaAccessToken,
-                                  Position& rootPos,
-                                  StateInfo& rootState,
-                                  Search::RootMoves& rootMoves)
+                                  Search::ThreadSearchContext& threadSearchContext)
 			{ return std::make_unique<TanukiMateWorker>(options, threads, threadIdx, numaAccessToken,
-                rootPos, rootState, rootMoves,
+                threadSearchContext,
 				// 📌 WorkerからEngine側の何かにアクセスしたい時は、コンストラクタで渡してしまうのが簡単だと思う。
 				//     TODO : あとで他の方法を考える。
 				mateClass

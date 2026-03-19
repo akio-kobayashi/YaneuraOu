@@ -30,20 +30,12 @@ Position::~Position() {
 }
 
 void Position::EvaluatorStorage::reset() {
-#if defined(EVAL_NNUE)
-    while (nnueAccumulatorSlots)
-    {
-        auto* next = nnueAccumulatorSlots->next;
-        delete nnueAccumulatorSlots;
-        nnueAccumulatorSlots = next;
-    }
-#endif
 #if defined(USE_PIECE_VALUE) || (defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(USE_EVAL_LIST)))
-    while (classicEvalStateSlots)
+    while (classicEvalStateBlocks)
     {
-        auto* next = classicEvalStateSlots->next;
-        delete classicEvalStateSlots;
-        classicEvalStateSlots = next;
+        auto* next = classicEvalStateBlocks->next;
+        delete classicEvalStateBlocks;
+        classicEvalStateBlocks = next;
     }
 #endif
 #if defined(USE_EVAL_LIST)
@@ -58,42 +50,23 @@ ClassicEvalState* Position::EvaluatorStorage::bind_classic_eval_state(StateInfo*
     if (state->classicEvalState)
         return state->classicEvalState;
 
-    for (auto* slot = classicEvalStateSlots; slot; slot = slot->next)
-        if (slot->owner == state)
-        {
-            state->classicEvalState = &slot->state;
-            return state->classicEvalState;
-        }
+    if (state->classicEvalStateCache)
+    {
+        state->classicEvalState = state->classicEvalStateCache;
+        return state->classicEvalState;
+    }
 
-    auto* slot  = new ClassicEvalStateSlot();
-    slot->owner = state;
-    slot->next  = classicEvalStateSlots;
-    classicEvalStateSlots = slot;
-    state->classicEvalState = &slot->state;
+    if (!classicEvalStateBlocks || classicEvalStateBlocks->used == ClassicEvalStateBlock::Capacity)
+    {
+        auto* block = new ClassicEvalStateBlock();
+        block->next = classicEvalStateBlocks;
+        classicEvalStateBlocks = block;
+    }
+
+    auto& slot = classicEvalStateBlocks->slots[classicEvalStateBlocks->used++];
+    state->classicEvalState = &slot.state;
+    state->classicEvalStateCache = state->classicEvalState;
     return state->classicEvalState;
-}
-#endif
-
-#if defined(EVAL_NNUE)
-Eval::NNUE::Accumulator* Position::EvaluatorStorage::bind_nnue_accumulator(StateInfo* state) {
-    ASSERT_LV3(state);
-
-    if (state->nnueAccumulator)
-        return state->nnueAccumulator;
-
-    for (auto* slot = nnueAccumulatorSlots; slot; slot = slot->next)
-        if (slot->owner == state)
-        {
-            state->nnueAccumulator = &slot->accumulator;
-            return state->nnueAccumulator;
-        }
-
-    auto* slot  = new NnueAccumulatorSlot();
-    slot->owner = state;
-    slot->next  = nnueAccumulatorSlots;
-    nnueAccumulatorSlots = slot;
-    state->nnueAccumulator = &slot->accumulator;
-    return state->nnueAccumulator;
 }
 #endif
 
@@ -101,12 +74,12 @@ void Position::EvaluatorStorage::bind_state(StateInfo* state) {
     ASSERT_LV3(state);
 
 #if defined(USE_PIECE_VALUE) || (defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(USE_EVAL_LIST)))
-    state->classicEvalState = nullptr;
-    bind_classic_eval_state(state);
+    if (state->classicEvalState)
+        return;
 #endif
-#if defined(EVAL_NNUE)
-    state->nnueAccumulator = nullptr;
-    bind_nnue_accumulator(state);
+
+#if defined(USE_PIECE_VALUE) || (defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(USE_EVAL_LIST)))
+    bind_classic_eval_state(state);
 #endif
 }
 
@@ -120,7 +93,7 @@ void Position::EvaluatorStorage::clone_state(const StateInfo* previousState, Sta
     *state->classicEvalState = *previousState->classicEvalState;
 #endif
 #if defined(EVAL_NNUE)
-    *state->nnueAccumulator = *previousState->nnueAccumulator;
+    state->nnueAccumulator = previousState->nnueAccumulator;
 #endif
 }
 
@@ -2536,10 +2509,19 @@ void Position::do_null_move(StateInfo& newSt, const T& tt) {
 	ASSERT_LV3(!checkers());
 	ASSERT_LV3(&newSt != st);
 
+#if defined(USE_PIECE_VALUE) || (defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(USE_EVAL_LIST)))
+    auto* cachedClassicEvalState = newSt.classicEvalStateCache;
+#endif
+
 #if STOCKFISH
     std::memcpy(&newSt, st, sizeof(StateInfo));
 #else
 	std::memcpy(static_cast<void*>(& newSt), st, sizeof(StateInfo));
+#endif
+
+#if defined(USE_PIECE_VALUE) || (defined(USE_CLASSIC_EVAL) && (defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(USE_EVAL_LIST)))
+    newSt.classicEvalStateCache = cachedClassicEvalState;
+    newSt.classicEvalState = nullptr;
 #endif
 
     auto* previousState = st;

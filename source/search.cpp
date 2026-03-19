@@ -8,7 +8,7 @@ Search::Worker::Worker(
 	ThreadPool& threads,
 	size_t threadIdx,
 	NumaReplicatedAccessToken numaAccessToken,
-	RootSearchContext rootSearchContext
+	ThreadSearchContext& threadSearchContext
 	/*
 						SharedState&                    sharedState,
                         std::unique_ptr<ISearchManager> sm,
@@ -24,9 +24,9 @@ Search::Worker::Worker(
 	threads(threads),
 	threadIdx(threadIdx),
     numaAccessToken(numaAccessToken),
-	rootPos(rootSearchContext.rootPos),
-	rootState(rootSearchContext.rootState),
-	rootMoves(rootSearchContext.rootMoves)
+	rootPos(threadSearchContext.root_pos()),
+	rootState(threadSearchContext.root_state()),
+	rootMoves(threadSearchContext.root_moves())
 
 	#if 0
     manager(std::move(sm)),
@@ -43,14 +43,14 @@ Search::Worker::Worker(
 	//      また、"usinewgame"に対して Engine.search_clear()が呼び出されるので、そこからもWorker::clear()が呼び出される。
 }
 
-void Search::Worker::prepare_for_search(ThreadRootState&  rootSearchState,
-                                        const LimitsType& limits,
-                                        const Position&   rootPosition,
-                                        const StateInfo&  rootStateSource,
-                                        const RootMoves&  rootMovesSource) {
+void Search::Worker::prepare_for_search(ThreadSearchContext& threadSearchContext,
+                                        const LimitsType&    limits,
+                                        const Position&      rootPosition,
+                                        const StateInfo&     rootStateSource,
+                                        const RootMoves&     rootMovesSource) {
 	this->limits = limits;
 	nodes        = 0;
-	rootSearchState.prepare_root_search(rootPosition, rootStateSource, rootMovesSource);
+	threadSearchContext.prepare_root_search(rootPosition, rootStateSource, rootMovesSource);
 	pre_start_searching();
 }
 

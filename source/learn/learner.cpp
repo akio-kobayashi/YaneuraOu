@@ -446,7 +446,7 @@ void MultiThinkGenSfen::thread_worker(size_t thread_id)
 		// Threads[0]...Threads[thread_num-1]までに対して同じようにすれば良い。
 		auto th = Threads[thread_id];
 
-		auto& pos = th->rootPos;
+		auto& pos = th->root_pos();
 		pos.set_hirate(&si);
 
 		// 自分スレッド用の置換表があるはずなので自分の置換表だけをクリアする。
@@ -837,7 +837,7 @@ void MultiThinkGenSfen::thread_worker(size_t thread_id)
 					Learner::search(pos, random_multi_pv_depth, random_multi_pv);
 					// rootMovesの上位N手のなかから一つ選択
 
-					auto& rm = th->rootMoves;
+					auto& rm = th->root_moves();
 
 					u64 s = min((u64)rm.size(), (u64)random_multi_pv);
 					for (u64 i = 1; i < s; ++i)
@@ -1269,7 +1269,7 @@ struct SfenReader
 	void read_for_mse()
 	{
 		auto th = Threads.main();
-		Position& pos = th->rootPos;
+		Position& pos = th->root_pos();
 		for (u64 i = 0; i < sfen_for_mse_size; ++i)
 		{
 			PackedSfenValue ps;
@@ -1691,7 +1691,7 @@ void LearnerThink::calc_loss(size_t thread_id, u64 done)
 
 	// 平手の初期局面のeval()の値を表示させて、揺れを見る。
 	auto th = Threads[thread_id];
-	auto& pos = th->rootPos;
+	auto& pos = th->root_pos();
 	StateInfo si;
 	pos.set_hirate(&si);
 	std::cout << "hirate eval = " << Eval::evaluate(pos);
@@ -1738,7 +1738,7 @@ void LearnerThink::calc_loss(size_t thread_id, u64 done)
 			for (size_t position_index = global_position_index++; position_index < num_sfens;
 				position_index = global_position_index++) {
 				auto th = Threads[thread_id];
-				auto& pos = th->rootPos;
+				auto& pos = th->root_pos();
 				StateInfo si;
 				auto& ps = sr.sfen_for_mse[position_index];
 				if (pos.set_from_packed_sfen(ps.sfen, &si).is_not_ok())
@@ -1904,7 +1904,7 @@ void LearnerThink::thread_worker(size_t thread_id)
 #endif
 
 	auto th = Threads[thread_id];
-	auto& pos = th->rootPos;
+	auto& pos = th->root_pos();
 
 	// qsearch()を呼び出した回数。
 	// ある程度呼び出すと置換表が汚れてくると思うので、クリアする。
@@ -2516,8 +2516,8 @@ void convert_bin(const vector<string>& filenames , const string& output_file_nam
 {
 	std::fstream fs;
 	auto th = Threads.main();
-	auto &tpos = th->rootPos;
-	auto &tstate = th->rootState;
+	auto &tpos = th->root_pos();
+	auto &tstate = th->root_state();
 	// plain形式の雑巾をやねうら王用のpackedsfenvalueに変換する
 	fs.open(output_file_name, ios::app | ios::binary);
 
@@ -3307,7 +3307,7 @@ namespace Learner {
 		// Threads[0]...Threads[thread_num-1]までに対して同じようにすれば良い。
 		auto& th = *Threads[thread_id];
 
-		auto& pos = th.rootPos;
+		auto& pos = th.root_pos();
 
 		// 終了フラグ
 		bool quit = false;

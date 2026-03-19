@@ -253,6 +253,22 @@ Current status:
 - `ThreadPool::start_thinking()` now hands off per-thread search setup through `Thread::prepare_for_search(...)`, so thread-local preparation logic is starting to live on the thread-side seam rather than in the pool loop body.
 - The non-Stockfish per-thread root-search reset path now executes through `Worker::prepare_for_search(...)`, which is a better home for worker-local hot-state reset than open-coding that logic in `ThreadPool`.
 - Thread-local NUMA and root-search state are now grouped under `Search::ThreadSearchContext`, so `Thread` no longer stores its NUMA token and root-search state as unrelated members.
+- `ThreadSearchContext` now owns NUMA-token installation and evaluator-binding hookup for the thread-local root state, so `Thread` construction touches less of that grouped state directly.
+- `Worker::prepare_for_search(...)` now receives the full `ThreadSearchContext` rather than just the root-state fragment, so the thread-local search context is becoming the actual handoff object between thread setup and worker-local preparation.
+- `Thread` construction now also reads the NUMA token back through `ThreadSearchContext`, reducing another direct field touch on the grouped thread-local state.
+- `ThreadSearchContext` now also exposes root-position, root-state, and root-move accessors, so even the legacy `Thread::rootPos/rootState/rootMoves` aliases no longer bind directly against the nested storage layout.
+- Worker construction now also receives `ThreadSearchContext&` rather than a bare `RootSearchContext`, so the thread-context object is the primary typed handoff at both worker-creation and worker-preparation seams.
+- `Thread::root_search_context()` has been removed because worker creation no longer needs a root-only wrapper from `Thread`; the root-only compatibility view now lives on `ThreadSearchContext` itself.
+- `Worker` and the derived worker constructors now also bind root-position/state/move references from `ThreadSearchContext&` directly, so the root-only compatibility wrapper is no longer the constructor boundary for worker objects.
+- `Worker::root_search_context()` has been removed as unused, so the remaining root-only compatibility view is no longer exposed from worker objects either.
+- `ThreadRootState::root_search_context()` has also been removed as unused, leaving `ThreadSearchContext` as the only remaining root-only compatibility view for the grouped thread-local state.
+- `Thread` now exposes `root_pos()`, `root_state()`, and `root_moves()` accessors, and helper-tool / learner call sites have started moving off the legacy `rootPos/rootState/rootMoves` aliases.
+- `YaneuraOuWorker` search-runtime reset (`nmpMinPly`, `bestMoveChanges`, `rootDepth`, `completedDepth`) now runs through a single helper, which is a better seam for later hot-state relocation into thread-context storage.
+- `YaneuraOuWorker` now groups its per-search hot runtime counters and depths under `SearchRuntimeState`, with compatibility references preserving current call sites while the storage boundary is being established.
+- `optimism` is now grouped into `SearchRuntimeState` as well, so the worker's per-search hot state is closer to a single relocatable block.
+- The tournament search path now reads and writes `optimism` directly through `SearchRuntimeState`, so that grouped hot-state block is no longer just passive storage.
+- `bestMoveChanges` is now also read and written directly through `SearchRuntimeState`, reducing another compatibility alias on the tournament search path.
+- `rootDelta` is now also read and written directly through `SearchRuntimeState`, so aspiration-window bookkeeping is using the grouped runtime block as its real storage.
 
 ### Phase E: Replace macro usage in non-hot layers
 - Convert simple feature checks into typed config helpers.

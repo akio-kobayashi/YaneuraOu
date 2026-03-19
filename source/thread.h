@@ -94,7 +94,7 @@ namespace Search {
 	class Worker;
 	typedef std::function<std::unique_ptr<Worker>(size_t /*thread_idx*/,
                                                   NumaReplicatedAccessToken /*token*/,
-                                                  RootSearchContext)> WorkerFactory;
+                                                  ThreadSearchContext&)> WorkerFactory;
 }
 
 class Thread {
@@ -157,11 +157,12 @@ public:
 	// 💡 searchingフラグがfalseになるのを待つ。
 
 	void   wait_for_search_finished();
-	Search::RootSearchContext root_search_context();
-
 	// Threadの自身のスレッド番号を返す。0 origin。
 	// コンストラクタで渡したthread_idが返ってくる。
 	size_t id() const { return idx; }
+	Position& root_pos() { return searchContext.root_pos(); }
+	StateInfo& root_state() { return searchContext.root_state(); }
+	Search::RootMoves& root_moves() { return searchContext.root_moves(); }
 
 	// 実行しているworker
 	std::unique_ptr<Search::Worker> worker;
@@ -202,9 +203,9 @@ private:
 public:
 	// Thread-local search context. Kept public for existing helper-tool access.
 	Search::ThreadSearchContext searchContext{};
-	Position&                   rootPos = searchContext.rootState.rootPos;
-	StateInfo&                  rootState = searchContext.rootState.rootState;
-	Search::RootMoves&          rootMoves = searchContext.rootState.rootMoves;
+	Position&                   rootPos = searchContext.root_pos();
+	StateInfo&                  rootState = searchContext.root_state();
+	Search::RootMoves&          rootMoves = searchContext.root_moves();
 };
 
 // 思考で用いるスレッドの集合体

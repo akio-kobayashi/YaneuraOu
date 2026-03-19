@@ -381,11 +381,11 @@ void YaneuraOuEngine::resize_threads() {
 
     auto worker_factory = [&](size_t threadIdx,
                               NumaReplicatedAccessToken numaAccessToken,
-                              Search::RootSearchContext rootSearchContext) {
+                              Search::ThreadSearchContext& threadSearchContext) {
         return std::make_unique<Search::YaneuraOuWorker>(
 
 			// Worker基底classが渡して欲しいもの。
-			options, threads, threadIdx, numaAccessToken, rootSearchContext,
+			options, threads, threadIdx, numaAccessToken, threadSearchContext,
 
 			// 追加でYaneuraOuEngineからもらいたいもの
 			tt, *this);
@@ -998,10 +998,10 @@ Search::YaneuraOuWorker::YaneuraOuWorker(OptionsMap&               options,
                                          ThreadPool&               threads,
                                          size_t                    threadIdx,
                                          NumaReplicatedAccessToken numaAccessToken,
-                                         RootSearchContext         rootSearchContext,
+                                         ThreadSearchContext&      threadSearchContext,
 										 TranspositionTable&       tt,
 										 YaneuraOuEngine&          engine) :
-    Search::Worker(options, threads, threadIdx, numaAccessToken, rootSearchContext), tt(tt),
+    Search::Worker(options, threads, threadIdx, numaAccessToken, threadSearchContext), tt(tt),
 		engine(engine), manager(engine.manager) {
 
 #if defined(EVAL_SFNN)
@@ -1023,6 +1023,12 @@ void Search::YaneuraOuWorker::ensure_network_replicated() {
 	#endif
 }
 
+void Search::YaneuraOuWorker::reset_search_runtime_state() {
+    nmpMinPly       = 0;
+    runtimeState.bestMoveChanges = 0;
+    rootDepth = completedDepth = 0;
+}
+
 void Search::YaneuraOuWorker::pre_start_searching() {
 
 	if (is_mainthread())
@@ -1031,9 +1037,7 @@ void Search::YaneuraOuWorker::pre_start_searching() {
 
     // 📝 StockfishではThreadPool::start_thinking()で行っているが、
     //     やねうら王では、派生classのpre_start_thinking()以降で行う。
-    nmpMinPly       = 0;
-    bestMoveChanges = 0;
-    rootDepth = completedDepth = 0;
+    reset_search_runtime_state();
 
     // 各WorkerのPosition::set_ekr()を呼び出して入玉ルールを反映させる必要がある。
     auto& search_options = main_manager()->search_options;
@@ -1754,8 +1758,8 @@ void Search::YaneuraOuWorker::iterative_deepening() {
 #if 0
             // Adjust optimism based on root move's averageScore
             // ルート手の averageScore に基づいて楽観度を調整する
-			optimism[us]  = 137 * avg / (std::abs(avg) + 91);
-            optimism[~us] = -optimism[us];
+			runtimeState.optimism[us]  = 137 * avg / (std::abs(avg) + 91);
+            runtimeState.optimism[~us] = -runtimeState.optimism[us];
 #endif
 
 			// 🤔 このoptimismは、StockfishのNNUE評価関数で何やら使っているようなのだが…。
@@ -1784,7 +1788,7 @@ void Search::YaneuraOuWorker::iterative_deepening() {
                 // fail highするごとにdepthを下げていく処理
                 Depth adjustedDepth =
                   std::max(1, rootDepth - failedHighCnt - 3 * (searchAgainCounter + 1) / 4);
-                rootDelta = beta - alpha;
+                runtimeState.rootDelta = beta - alpha;
                 bestValue = search<Root>(rootPos, ss, alpha, beta, adjustedDepth, false);
 
                 // Bring the best move to the front. It is critical that sorting
@@ -2008,8 +2012,8 @@ void Search::YaneuraOuWorker::iterative_deepening() {
         for (auto&& th : threads)
         {
             auto yw = toYaneuraOuWorker(th->worker);
-            totBestMoveChanges += yw->bestMoveChanges;
-            yw->bestMoveChanges = 0;
+            totBestMoveChanges += yw->runtimeState.bestMoveChanges;
+            yw->runtimeState.bestMoveChanges = 0;
         }
 
         // Do we have time for the next iteration? Can we stop searching now?
@@ -4145,7 +4149,7 @@ moves_loop:  // When in check, search starts here
                 //     time managementがおかしくなる。
 
                 if (moveCount > 1 && !pvIdx)
-                    ++bestMoveChanges;
+                    ++runtimeState.bestMoveChanges;
             }
             else
                 // All other moves but the PV, are set to the lowest value: this
@@ -5137,7 +5141,8 @@ Value Search::YaneuraOuWorker::qsearch(Position& pos, Stack* ss, Value alpha, Va
 // LMRのreductionの値を計算する。
 Depth Search::YaneuraOuWorker::reduction(bool i, Depth d, int mn, int delta) const {
     int reductionScale = reductions[d] * reductions[mn];
-    return reductionScale - delta * 757 / rootDelta + !i * reductionScale * 218 / 512 + 1200;
+    return reductionScale - delta * 757 / runtimeState.rootDelta + !i * reductionScale * 218 / 512
+         + 1200;
 }
 
 // 📝 やねうら王では、下記のelapsed(), elapsed_time()は用いない。
@@ -5171,7 +5176,7 @@ Value Search::YaneuraOuWorker::evaluate(const Position& pos) {
 #if defined(EVAL_SFNN)
 	// 最新のStockfishのコード
 
-    return evaluationContext.evaluate(pos, optimism[pos.side_to_move()]);
+    return evaluationContext.evaluate(pos, runtimeState.optimism[pos.side_to_move()]);
 
 #else
 	return evaluationContext.evaluate(pos);

@@ -57,8 +57,8 @@ namespace Book {
 			auto sfen = sfens[id];
 
 			auto th = Threads[thread_id];
-			auto& pos = th->rootPos;
-			auto& state = th->rootState;
+			auto& pos = th->root_pos();
+			auto& state = th->root_state();
 			pos.set(sfen, &state);
 
 			if (pos.is_mated())
@@ -70,7 +70,7 @@ namespace Book {
 			Learner::search(pos, search_depth , multi_pv , search_nodes);
 
 			// MultiPVで局面を足す、的な
-			auto& rootMoves = th->rootMoves;
+			auto& rootMoves = th->root_moves();
 			size_t m = std::min(multi_pv, rootMoves.size());
 
 			BookMovesPtr move_list(new BookMoves());
