@@ -705,6 +705,44 @@ Verification note:
 - `make -C source tournament APPLE_CPU=native -j4` succeeds
 - the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
 
+### Slice 32: null binding pointer now means local fallback
+
+Implemented in:
+- [`position.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.h)
+- [`position.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.cpp)
+
+Changed seam:
+- `Position` no longer stores the local binding pointer as the default active state.
+- A null `evaluatorStorageBinding` now canonically means "use the local fallback binding".
+- Binding resolution is handled through `resolve_evaluator_storage_binding(...)`, leaving the member itself as a raw external-binding override only.
+
+Purpose:
+- simplify the compatibility-state representation inside `Position`
+- reduce special cases tied to the local binding object and make later ownership relocation less dependent on a stored fallback pointer
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 33: Position::set now preserves canonical binding form
+
+Implemented in:
+- [`position.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.h)
+- [`position.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.cpp)
+
+Changed seam:
+- `prepare_evaluator_storage_binding_for_set()` now returns the raw installed binding override, not the resolved active binding object.
+- `Position::set()` restores binding state by reusing `set_evaluator_storage_binding(...)`.
+- When the caller was using local fallback, `set()` now preserves the canonical `nullptr` form instead of restoring a pointer to the local binding object.
+
+Purpose:
+- keep Phase C moving by reducing the amount of special-case binding representation logic in `set()`
+- preserve the simpler internal invariant that only external overrides are stored explicitly
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
 ## Non-Goals For The First Pass
 
 Do not start by:

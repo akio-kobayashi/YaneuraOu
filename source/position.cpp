@@ -181,33 +181,28 @@ void Position::EvaluatorStorageBinding::clone_state(const StateInfo* previousSta
 }
 
 void Position::install_evaluator_storage_binding(EvaluatorStorageBinding* binding) {
-    evaluatorStorageBinding = binding ? binding : local_evaluator_storage_binding();
+    evaluatorStorageBinding = binding;
 }
 
 Position::EvaluatorStorageBinding* Position::prepare_evaluator_storage_binding_for_set() {
-    auto* binding = active_evaluator_storage_binding();
-    binding->reset_active();
-    return binding;
+    active_evaluator_storage_binding()->reset_active();
+    return evaluatorStorageBinding;
 }
 
-void Position::restore_evaluator_storage_binding_after_set(EvaluatorStorageBinding* binding) {
-    install_evaluator_storage_binding(binding);
+Position::EvaluatorStorageBinding* Position::resolve_evaluator_storage_binding(EvaluatorStorageBinding* binding) {
+    return binding ? binding : &localEvaluatorStorageBinding;
 }
 
-Position::EvaluatorStorageBinding* Position::local_evaluator_storage_binding() {
-    return &localEvaluatorStorageBinding;
-}
-
-const Position::EvaluatorStorageBinding* Position::local_evaluator_storage_binding() const {
-    return &localEvaluatorStorageBinding;
+const Position::EvaluatorStorageBinding* Position::resolve_evaluator_storage_binding(const EvaluatorStorageBinding* binding) const {
+    return binding ? binding : &localEvaluatorStorageBinding;
 }
 
 Position::EvaluatorStorageBinding* Position::active_evaluator_storage_binding() {
-    return evaluatorStorageBinding ? evaluatorStorageBinding : local_evaluator_storage_binding();
+    return resolve_evaluator_storage_binding(evaluatorStorageBinding);
 }
 
 const Position::EvaluatorStorageBinding* Position::active_evaluator_storage_binding() const {
-    return evaluatorStorageBinding ? evaluatorStorageBinding : local_evaluator_storage_binding();
+    return resolve_evaluator_storage_binding(evaluatorStorageBinding);
 }
 
 void Position::set_evaluator_storage_binding(EvaluatorStorageBinding* binding) {
@@ -629,7 +624,7 @@ Position& Position::set(const std::string& sfen, StateInfo* si) {
     std::memset(static_cast<void*>(si), 0, sizeof(StateInfo));
 #endif
 
-    restore_evaluator_storage_binding_after_set(currentEvaluatorStorageBinding);
+    set_evaluator_storage_binding(currentEvaluatorStorageBinding);
     st = si;
 
     active_evaluator_storage_binding()->bind_state(st);

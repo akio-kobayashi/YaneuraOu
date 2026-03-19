@@ -226,6 +226,8 @@ Current status:
 - `Position` now reaches the active binding-policy object through a dedicated accessor, reducing direct raw-member access to the binding pointer itself.
 - Local fallback binding selection now also flows through a dedicated accessor, reducing direct references to the local binding member.
 - `Position::set()` no longer open-codes evaluator-binding reset/restore choreography; that reset boundary now lives behind dedicated helpers.
+- `Position` now treats a null binding pointer as the canonical local-fallback state, with resolution handled by a dedicated seam instead of by storing the local binding pointer directly.
+- `Position::set()` now preserves that canonical null-versus-external binding form across `memset`, instead of restoring the resolved local binding object pointer.
 - The build target mismatch that previously mixed `normal` and `tournament` object files is also fixed by splitting object directories per target, so clean tournament rebuilds and short USI search runs now succeed again.
 
 ### Phase D: Restructure search/eval state

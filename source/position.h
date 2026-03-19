@@ -1148,11 +1148,10 @@ private:
 
 	// StateInfoの初期化。Position::set()のタイミングで行われる。
 	void set_state() const;
-    EvaluatorStorageBinding* local_evaluator_storage_binding();
-    const EvaluatorStorageBinding* local_evaluator_storage_binding() const;
+    EvaluatorStorageBinding* resolve_evaluator_storage_binding(EvaluatorStorageBinding* binding);
+    const EvaluatorStorageBinding* resolve_evaluator_storage_binding(const EvaluatorStorageBinding* binding) const;
     void install_evaluator_storage_binding(EvaluatorStorageBinding* binding);
     EvaluatorStorageBinding* prepare_evaluator_storage_binding_for_set();
-    void restore_evaluator_storage_binding_after_set(EvaluatorStorageBinding* binding);
     EvaluatorStorageBinding* active_evaluator_storage_binding();
     const EvaluatorStorageBinding* active_evaluator_storage_binding() const;
 
@@ -1285,7 +1284,7 @@ private:
     // Phase C compatibility layer: evaluator storage ownership can now live
     // outside Position, while non-search callers still get a local fallback.
     EvaluatorStorageBinding  localEvaluatorStorageBinding{};
-    EvaluatorStorageBinding* evaluatorStorageBinding = &localEvaluatorStorageBinding;
+    EvaluatorStorageBinding* evaluatorStorageBinding = nullptr;
 
 #endif
 };
