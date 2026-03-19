@@ -1284,7 +1284,8 @@ void Search::YaneuraOuWorker::start_searching() {
 
 SKIP_SEARCH:
 
-    while (!threads.stop && (main_manager()->ponder || limits.infinite))
+    while (!threads.stop.load(std::memory_order_relaxed)
+           && (main_manager()->ponder || limits.infinite))
     {
         // Busy wait for a stop or a ponder reset
         // stop か ponder reset を待つ間のビジーウェイト
@@ -1633,7 +1634,7 @@ void Search::YaneuraOuWorker::iterative_deepening() {
     //     main threadのrootDepthがそれを超えた時点でこのループを抜ける。
     //     (main threadが抜けるとthreads.stop == trueになるのでそのあとsub threadは勝手にこのループを抜ける)
 
-    while (++rootDepth < MAX_PLY && !threads.stop
+    while (++rootDepth < MAX_PLY && !threads.stop.load(std::memory_order_relaxed)
            && !(limits.depth && mainThread && rootDepth > limits.depth))
     {
         /*
@@ -1819,7 +1820,7 @@ void Search::YaneuraOuWorker::iterative_deepening() {
                 // RootMoves は前回のイテレーションを参照しているが依然として有効なので、
                 // ソートは安全である。
 
-                if (threads.stop)
+                if (threads.stop.load(std::memory_order_relaxed))
                     break;
 
                 // When failing high/low give some update before a re-search. To avoid
@@ -1889,7 +1890,8 @@ void Search::YaneuraOuWorker::iterative_deepening() {
             std::stable_sort(rootMoves.begin() /* + pvFirst */, rootMoves.begin() + pvIdx + 1);
 
             if (mainThread
-                && (threads.stop || pvIdx + 1 == multiPV || nodes > 10000000)
+                && (threads.stop.load(std::memory_order_relaxed) || pvIdx + 1 == multiPV
+                    || nodes > 10000000)
                 // A thread that aborted search can have mated-in/TB-loss PV and
                 // score that cannot be trusted, i.e. it can be delayed or refuted
                 // if we would have had time to fully search other root-moves. Thus
@@ -1920,12 +1922,12 @@ void Search::YaneuraOuWorker::iterative_deepening() {
 #endif
 
 
-            if (threads.stop)
+            if (threads.stop.load(std::memory_order_relaxed))
                 break;
 
         }  // multi pv loop
 
-        if (!threads.stop)
+        if (!threads.stop.load(std::memory_order_relaxed))
             completedDepth = rootDepth;
 
         // We make sure not to pick an unproven mated-in score,
@@ -2023,7 +2025,9 @@ void Search::YaneuraOuWorker::iterative_deepening() {
 #else
         // 📝 やねうら王の場合、search_endが設定されている時はもう終了が確定しているので
         //     この終了チェックを行うのは無駄である。
-        if (limits.use_time_management() && !threads.stop && !mainThread->stopOnPonderhit
+        if (limits.use_time_management()
+            && !threads.stop.load(std::memory_order_relaxed)
+            && !mainThread->stopOnPonderhit
             && !mainThread->tm.search_end)
 #endif
         {
