@@ -73,10 +73,15 @@ Refactor direction:
 - Use the newly introduced access seams to move evaluator-local mutable state into evaluator-owned or worker-owned storage.
 - Keep a compatibility layer until all call sites stop depending on `StateInfo` layout.
 - Move one evaluator-specific field group at a time instead of attempting a one-shot rewrite.
+- Treat hot evaluator state separately from cold compatibility state. In particular,
+  classic NNUE accumulator storage must keep its locality characteristics even if
+  other evaluator-owned state is moved outward.
 
 Recommended first slice:
 - Group classic NNUE-specific state behind accessor-backed storage.
-- Then relocate one field family at a time, starting with accumulator-like caches rather than broad `StateInfo` surgery.
+- Then relocate one field family at a time, but validate each step against
+  tournament-build `bench` before keeping it. Ownership cleanup is not a
+  success if it regresses hot-path locality.
 
 ### 4. Reduce dependence on `config.h` feature macros
 
@@ -121,6 +126,8 @@ Refactor direction:
   - NUMA-local replicas
   - thread-local mutable caches
 - Push evaluator caches closer to worker-thread state.
+- Keep the hottest evaluator state in the cheapest layout available. Thread
+  context work should improve locality, not merely move ownership.
 
 Recommended first slice:
 - Document and simplify ownership of `networks`, accumulator stacks, and refresh tables.
@@ -156,8 +163,8 @@ Recommended order:
 1. evaluator score-semantics cleanup
 2. search-entry predicate cleanup on normalized static eval
 3. evaluator access-boundary cleanup
-4. evaluator ownership move out of `Position` / `StateInfo`
-5. Thread-context and NUMA ownership cleanup
+4. evaluator ownership cleanup with hot-state exceptions
+5. Thread-context and NUMA ownership cleanup with benchmark gates
 6. Macro reduction through config abstraction
 7. Build-system modernization
 8. SIMD/vendor-specific cleanup after ownership and build boundaries are clearer
@@ -202,12 +209,20 @@ Current status:
 - Relocate evaluator-local mutable state out of `StateInfo` in small slices.
 - Keep accessor compatibility during the transition.
 - Verify each storage move with a full clean rebuild before proceeding.
+- Treat NNUE accumulator locality as a hard constraint; do not keep ownership
+  changes that materially regress tournament `bench`.
 
 Current status:
-- Phase C is complete for active code paths.
-- `StateInfo` now keeps only an NNUE sidecar pointer, while `Position` owns the accumulator slot list and binds fresh storage on `set()`, `do_move()`, and `do_null_move()`.
-- Existing `Position` accumulator accessors remain the compatibility layer, so evaluator and feature-transformer call sites do not depend on the storage move.
-- `do_null_move()` explicitly clones the previous accumulator state before invalidating the score cache so null-move reuse semantics stay unchanged.
+- Phase C is complete for active code paths, but with one explicit exception:
+  classic NNUE accumulator storage remains inline on `StateInfo`.
+- A full ownership move for NNUE accumulator storage was prototyped and measured,
+  but it caused a severe tournament `bench` regression. The branch now treats
+  accumulator locality as more important than uniform ownership cleanup.
+- Existing `Position` accumulator accessors remain the compatibility layer, so
+  evaluator and feature-transformer call sites still do not depend on the final
+  storage placement.
+- `do_null_move()` continues to clone the previous accumulator state before
+  invalidating the score cache so null-move reuse semantics stay unchanged.
 - Classic evaluator-owned `materialValue`, `EvalSum`, and `DirtyPiece` storage now also move through a `Position`-owned sidecar, leaving `StateInfo` with compatibility pointers instead of inline storage for those active code paths.
 - `EvalList` and the active evaluator sidecars are now grouped under a single `Position::EvaluatorStorage` compatibility object.
 - Worker root positions now bind that compatibility object from `Thread` scope instead of always allocating it inside `Position`, so the first external ownership step is now in place for active search paths.
@@ -237,11 +252,16 @@ Current status:
 - Raw evaluator-binding override access is now routed through a named accessor as well, leaving fewer direct touches of the compatibility pointer state inside `Position`.
 - The remaining local-versus-external binding policy is now grouped under `EvaluatorStorageBindingState`, so `Position` no longer owns separate local and override members for evaluator-storage compatibility state.
 - The build target mismatch that previously mixed `normal` and `tournament` object files is also fixed by splitting object directories per target, so clean tournament rebuilds and short USI search runs now succeed again.
+- The Phase C takeaway is now explicit: cold or medium-frequency evaluator state
+  may move behind compatibility storage, but NNUE accumulator data should remain
+  in the hottest practical layout unless a replacement layout proves bench-neutral.
 
 ### Phase D: Restructure search/eval state
 - Define a search thread context object.
 - Consolidate accumulator/cache ownership.
 - Clarify NUMA-local versus thread-local data.
+- Add performance gates to every hot-path slice. A Phase D refactor is only
+  acceptable if tournament `bench` and smoke selfplay remain stable.
 
 Current status:
 - The first Phase D slice is now in progress: thread-local root search state is grouped under `Search::ThreadRootState`, and worker construction now receives a `Search::RootSearchContext` instead of three loose root references.
@@ -258,6 +278,12 @@ Current status:
 - `Thread` construction now also reads the NUMA token back through `ThreadSearchContext`, reducing another direct field touch on the grouped thread-local state.
 - `ThreadSearchContext` now also exposes root-position, root-state, and root-move accessors, so even the legacy `Thread::rootPos/rootState/rootMoves` aliases no longer bind directly against the nested storage layout.
 - Worker construction now also receives `ThreadSearchContext&` rather than a bare `RootSearchContext`, so the thread-context object is the primary typed handoff at both worker-creation and worker-preparation seams.
+- Phase D guidance has been tightened by the Phase C measurements:
+  `ThreadSearchContext` work should continue, but hot evaluator state must not
+  be moved out of cache-friendly layouts merely for ownership symmetry.
+- The practical success criteria for the next Phase D slices are now:
+  no tournament `bench` regression, no USI/selfplay regressions, and ideally at
+  least one measurable locality win before broader ownership churn continues.
 - `Thread::root_search_context()` has been removed because worker creation no longer needs a root-only wrapper from `Thread`; the root-only compatibility view now lives on `ThreadSearchContext` itself.
 - `Worker` and the derived worker constructors now also bind root-position/state/move references from `ThreadSearchContext&` directly, so the root-only compatibility wrapper is no longer the constructor boundary for worker objects.
 - `Worker::root_search_context()` has been removed as unused, so the remaining root-only compatibility view is no longer exposed from worker objects either.
