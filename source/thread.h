@@ -201,7 +201,7 @@ private:
 
 public:
 	// Legacy-accessible root data used by helper tools.
-	Position::EvaluatorStorage rootEvaluatorStorage;
+	Position::EvaluatorStorageBinding rootEvaluatorStorageBinding;
 	Position                  rootPos;
 	StateInfo                 rootState;
 	Search::RootMoves         rootMoves;

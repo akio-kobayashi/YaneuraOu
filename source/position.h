@@ -698,10 +698,10 @@ public:
 
 #if defined(USE_EVAL_LIST)
 	// 評価関数で使うための、どの駒番号の駒がどこにあるかなどの情報。
-	Eval::EvalList* eval_list() { return active_evaluator_storage()->eval_list(); }
-	const Eval::EvalList* eval_list() const { return active_evaluator_storage()->eval_list(); }
-	Eval::EvalList* mutable_eval_list() { return active_evaluator_storage()->eval_list(); }
-	void clear_eval_list() { active_evaluator_storage()->eval_list()->clear(); }
+	Eval::EvalList* eval_list() { return active_evaluator_storage_binding()->eval_list(); }
+	const Eval::EvalList* eval_list() const { return active_evaluator_storage_binding()->eval_list(); }
+	Eval::EvalList* mutable_eval_list() { return active_evaluator_storage_binding()->eval_list(); }
+	void clear_eval_list() { active_evaluator_storage_binding()->eval_list()->clear(); }
 	int eval_list_length() const { return eval_list()->length(); }
 	const Eval::BonaPiece* eval_piece_list_fb() const { return eval_list()->piece_list_fb(); }
 	const Eval::BonaPiece* eval_piece_list_fw() const { return eval_list()->piece_list_fw(); }
@@ -1126,11 +1126,17 @@ public:
         void detach_external();
         EvaluatorStorage* ensure_local();
         const EvaluatorStorage* current() const;
+
+#if defined(USE_EVAL_LIST)
+        Eval::EvalList*       eval_list() { return ensure_local()->eval_list(); }
+        const Eval::EvalList* eval_list() const { return current()->eval_list(); }
+#endif
+
+        void bind_state(StateInfo* state);
+        void clone_state(const StateInfo* previousState, StateInfo* state);
     };
 
-    void bind_external_evaluator_storage(EvaluatorStorage* storage);
-    void detach_external_evaluator_storage();
-    bool has_external_evaluator_storage() const { return evaluatorStorageBinding.has_external(); }
+    void set_evaluator_storage_binding(EvaluatorStorageBinding* binding);
 
 private:
     // Initialization helpers (used while setting up a position)
@@ -1142,14 +1148,13 @@ private:
 
 	// StateInfoの初期化。Position::set()のタイミングで行われる。
 	void set_state() const;
-
-#if defined(USE_EVAL_LIST)
-    EvaluatorStorage* active_evaluator_storage();
-    const EvaluatorStorage* active_evaluator_storage() const;
-#endif
-    void reset_evaluator_storage();
-    void release_evaluator_storage();
-    void bind_evaluator_storage();
+    EvaluatorStorageBinding* local_evaluator_storage_binding();
+    const EvaluatorStorageBinding* local_evaluator_storage_binding() const;
+    void install_evaluator_storage_binding(EvaluatorStorageBinding* binding);
+    EvaluatorStorageBinding* prepare_evaluator_storage_binding_for_set();
+    void restore_evaluator_storage_binding_after_set(EvaluatorStorageBinding* binding);
+    EvaluatorStorageBinding* active_evaluator_storage_binding();
+    const EvaluatorStorageBinding* active_evaluator_storage_binding() const;
 
 #if STOCKFISH
     void set_check_info() const;
@@ -1279,7 +1284,8 @@ private:
 
     // Phase C compatibility layer: evaluator storage ownership can now live
     // outside Position, while non-search callers still get a local fallback.
-    EvaluatorStorageBinding evaluatorStorageBinding{};
+    EvaluatorStorageBinding  localEvaluatorStorageBinding{};
+    EvaluatorStorageBinding* evaluatorStorageBinding = &localEvaluatorStorageBinding;
 
 #endif
 };

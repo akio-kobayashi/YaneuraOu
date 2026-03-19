@@ -26,7 +26,7 @@ using namespace Eval;
 int Position::max_repetition_ply = 16;
 
 Position::~Position() {
-    release_evaluator_storage();
+    active_evaluator_storage_binding()->release_all();
 }
 
 void Position::EvaluatorStorage::reset() {
@@ -172,44 +172,52 @@ const Position::EvaluatorStorage* Position::EvaluatorStorageBinding::current() c
     return active;
 }
 
-void Position::release_evaluator_storage() {
-#if !STOCKFISH
-    evaluatorStorageBinding.release_all();
-#endif
+void Position::EvaluatorStorageBinding::bind_state(StateInfo* state) {
+    ensure_local()->bind_state(state);
 }
 
-void Position::reset_evaluator_storage() {
-#if !STOCKFISH
-    evaluatorStorageBinding.reset_active();
-#endif
+void Position::EvaluatorStorageBinding::clone_state(const StateInfo* previousState, StateInfo* state) {
+    ensure_local()->clone_state(previousState, state);
 }
 
-void Position::bind_evaluator_storage() {
-#if !STOCKFISH
-    evaluatorStorageBinding.ensure_local();
-#endif
+void Position::install_evaluator_storage_binding(EvaluatorStorageBinding* binding) {
+    evaluatorStorageBinding = binding ? binding : local_evaluator_storage_binding();
 }
 
-void Position::bind_external_evaluator_storage(EvaluatorStorage* storage) {
+Position::EvaluatorStorageBinding* Position::prepare_evaluator_storage_binding_for_set() {
+    auto* binding = active_evaluator_storage_binding();
+    binding->reset_active();
+    return binding;
+}
+
+void Position::restore_evaluator_storage_binding_after_set(EvaluatorStorageBinding* binding) {
+    install_evaluator_storage_binding(binding);
+}
+
+Position::EvaluatorStorageBinding* Position::local_evaluator_storage_binding() {
+    return &localEvaluatorStorageBinding;
+}
+
+const Position::EvaluatorStorageBinding* Position::local_evaluator_storage_binding() const {
+    return &localEvaluatorStorageBinding;
+}
+
+Position::EvaluatorStorageBinding* Position::active_evaluator_storage_binding() {
+    return evaluatorStorageBinding ? evaluatorStorageBinding : local_evaluator_storage_binding();
+}
+
+const Position::EvaluatorStorageBinding* Position::active_evaluator_storage_binding() const {
+    return evaluatorStorageBinding ? evaluatorStorageBinding : local_evaluator_storage_binding();
+}
+
+void Position::set_evaluator_storage_binding(EvaluatorStorageBinding* binding) {
 #if !STOCKFISH
-    evaluatorStorageBinding.bind_external(storage);
+    active_evaluator_storage_binding()->reset_active();
+    install_evaluator_storage_binding(binding);
+    active_evaluator_storage_binding()->ensure_local();
 #else
-    (void) storage;
+    (void) binding;
 #endif
-}
-
-void Position::detach_external_evaluator_storage() {
-#if !STOCKFISH
-    evaluatorStorageBinding.detach_external();
-#endif
-}
-
-Position::EvaluatorStorage* Position::active_evaluator_storage() {
-    return evaluatorStorageBinding.ensure_local();
-}
-
-const Position::EvaluatorStorage* Position::active_evaluator_storage() const {
-    return evaluatorStorageBinding.current();
 }
 
 // minor pieceは、香・桂・銀・金とその成駒に限ることにする。
@@ -603,7 +611,7 @@ void Position::set_state() const {
 
 // sfen文字列で盤面を設定する
 Position& Position::set(const std::string& sfen, StateInfo* si) {
-    reset_evaluator_storage();
+    auto* currentEvaluatorStorageBinding = prepare_evaluator_storage_binding_for_set();
 
 #if STOCKFISH
 
@@ -621,9 +629,10 @@ Position& Position::set(const std::string& sfen, StateInfo* si) {
     std::memset(static_cast<void*>(si), 0, sizeof(StateInfo));
 #endif
 
+    restore_evaluator_storage_binding_after_set(currentEvaluatorStorageBinding);
     st = si;
 
-    active_evaluator_storage()->bind_state(st);
+    active_evaluator_storage_binding()->bind_state(st);
 
     // 変な入力をされることはあまり想定していない。
     // sfen文字列は、普通GUI側から渡ってくるのでおかしい入力であることはありえないからである。
@@ -1819,7 +1828,7 @@ void Position::do_move_impl(Move m, StateInfo& newSt, bool givesCheck, const T* 
     newSt.previous = st;
     st             = &newSt;
 
-    active_evaluator_storage()->bind_state(st);
+    active_evaluator_storage_binding()->bind_state(st);
 
     // --- 手数がらみのカウンターのインクリメント
 
@@ -2559,7 +2568,7 @@ void Position::do_null_move(StateInfo& newSt, const T& tt) {
 	newSt.previous = previousState;
     st             = &newSt;
 
-    active_evaluator_storage()->clone_state(previousState, st);
+    active_evaluator_storage_binding()->clone_state(previousState, st);
 
 #if STOCKFISH
 	if (st->epSquare != SQ_NONE)

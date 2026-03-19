@@ -219,6 +219,13 @@ Current status:
 - State-level sidecar bind and clone ownership now lives on `EvaluatorStorage` itself, leaving `Position` to select the active storage owner and forward setup/move/null-move transitions.
 - `Position` now uses an `active_evaluator_storage()` seam for eval-list access and state-transition forwarding, further reducing the remaining wrapper logic around the unified evaluator-storage object.
 - Ownership policy for local-versus-external evaluator storage is now grouped behind `EvaluatorStorageBinding`, so `Position` no longer open-codes the two-pointer owner dance directly.
+- External search-path binding now happens at the `EvaluatorStorageBinding` level rather than the raw storage level, so thread-owned owner policy can move outward together with the storage it controls.
+- Active evaluator-state access now delegates through `EvaluatorStorageBinding`, so `Position` no longer needs a separate `active_evaluator_storage()` wrapper for eval-list access or state bind/clone transitions.
+- `Position` no longer carries dedicated reset/release wrappers for evaluator storage lifecycle; active cleanup now routes straight through the bound policy object.
+- Local fallback and external binding selection now share the same `set_evaluator_storage_binding(...)` entry point, so `Position` no longer exposes a separate "switch back to local" API.
+- `Position` now reaches the active binding-policy object through a dedicated accessor, reducing direct raw-member access to the binding pointer itself.
+- Local fallback binding selection now also flows through a dedicated accessor, reducing direct references to the local binding member.
+- `Position::set()` no longer open-codes evaluator-binding reset/restore choreography; that reset boundary now lives behind dedicated helpers.
 - The build target mismatch that previously mixed `normal` and `tournament` object files is also fixed by splitting object directories per target, so clean tournament rebuilds and short USI search runs now succeed again.
 
 ### Phase D: Restructure search/eval state

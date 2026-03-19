@@ -28,7 +28,7 @@ Thread::Thread(
 	//nthreads(sharedState.options["Threads"]),
 	stdThread(&Thread::idle_loop, this)
 {
-	rootPos.bind_external_evaluator_storage(&rootEvaluatorStorage);
+	rootPos.set_evaluator_storage_binding(&rootEvaluatorStorageBinding);
 
 #if !defined(__EMSCRIPTEN__)
 
@@ -80,7 +80,7 @@ Thread::~Thread() {
 	exit = true;
 	start_searching();
 	stdThread.join();
-	rootPos.detach_external_evaluator_storage();
+	rootPos.set_evaluator_storage_binding(nullptr);
 }
 
 // Wakes up the thread that will start the search

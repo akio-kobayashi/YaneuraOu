@@ -569,6 +569,142 @@ Verification note:
 - `make -C source tournament APPLE_CPU=native -j4` succeeds
 - the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, and `quit`
 
+### Slice 25: external binding now attaches the whole binding policy object
+
+Implemented in:
+- [`position.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.h)
+- [`position.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.cpp)
+- [`thread.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/thread.h)
+- [`thread.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/thread.cpp)
+
+Changed seam:
+- `Thread` now owns `EvaluatorStorageBinding` instead of only raw evaluator storage.
+- `Position` binds external evaluator state through `set_evaluator_storage_binding(...)`.
+- `Position::set()` now preserves an external binding-policy owner across `memset` instead of preserving only a raw storage pointer.
+
+Purpose:
+- move Phase C one step closer to thread-context ownership by keeping storage owner policy and storage object together
+- reduce the amount of local/external ownership choreography that still lives in `Position`
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 26: active evaluator-state access now delegates through the binding object
+
+Implemented in:
+- [`position.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.h)
+- [`position.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.cpp)
+
+Changed seam:
+- `EvaluatorStorageBinding` now owns active-path delegation for eval-list access and state bind/clone transitions.
+- `Position` no longer reaches through an `active_evaluator_storage()` wrapper for eval-list reads/writes or for `set()` / `do_move()` / `do_null_move()` setup.
+- Active callers now talk to the binding-policy object directly, leaving `Position` with less raw knowledge of storage-selection details.
+
+Purpose:
+- keep Phase C moving by making the binding object, rather than `Position`, the direct compatibility seam for evaluator-owned state
+- shrink the remaining amount of owner-policy forwarding that still lives on `Position`
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 27: evaluator-storage lifecycle wrappers removed from Position
+
+Implemented in:
+- [`position.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.h)
+- [`position.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.cpp)
+
+Changed seam:
+- `Position` no longer carries dedicated `reset_evaluator_storage()` / `release_evaluator_storage()` wrappers.
+- Destructor cleanup, binding swaps, and `set()` reset flow now call the bound `EvaluatorStorageBinding` directly.
+- Active lifecycle control is therefore one step closer to the binding-policy object and one step farther from `Position`.
+
+Purpose:
+- keep shrinking the compatibility surface on `Position`
+- make the binding object the single active seam for both storage selection and storage lifecycle
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 28: local fallback and external binding now share one selection API
+
+Implemented in:
+- [`position.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.h)
+- [`position.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.cpp)
+- [`thread.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/thread.cpp)
+
+Changed seam:
+- `Position` no longer exposes a separate API to switch back to local evaluator storage.
+- `set_evaluator_storage_binding(nullptr)` now means "use the local fallback binding", while a non-null pointer installs the external binding policy.
+- `Position::set()` uses the same binding-install path after `memset`, so binding restoration and normal binding swaps share one helper.
+
+Purpose:
+- shrink the public compatibility surface on `Position`
+- keep Phase C moving by making local-versus-external selection a single operation instead of two separate control paths
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 29: active binding access now flows through a Position seam
+
+Implemented in:
+- [`position.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.h)
+- [`position.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.cpp)
+
+Changed seam:
+- `Position` now uses `active_evaluator_storage_binding()` for eval-list access, destructor cleanup, and state bind/clone transitions.
+- Direct reads of the raw `evaluatorStorageBinding` member are reduced to installation and fallback selection points.
+- Active callers therefore reach evaluator-owned state through a named binding seam instead of through a raw pointer member.
+
+Purpose:
+- continue shrinking the amount of implicit ownership knowledge embedded in `Position`
+- make the active binding object the explicit compatibility seam for Phase C code paths
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 30: local fallback binding access now flows through a Position seam
+
+Implemented in:
+- [`position.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.h)
+- [`position.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.cpp)
+
+Changed seam:
+- `Position` now resolves the local fallback binding through `local_evaluator_storage_binding()`.
+- Binding installation and active-binding fallback no longer reference `localEvaluatorStorageBinding` directly.
+- This keeps both active and local binding selection behind named seams instead of raw member references.
+
+Purpose:
+- continue reducing fallback-policy knowledge embedded directly in `Position`
+- make future binding relocation work less dependent on a specific member name or storage location
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
+### Slice 31: Position::set binding reset/restore now lives behind named helpers
+
+Implemented in:
+- [`position.h`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.h)
+- [`position.cpp`](/Users/akio/Documents/GitHub/YaneuraOu/source/position.cpp)
+
+Changed seam:
+- `Position::set()` no longer open-codes evaluator-binding reset and restore directly.
+- The `memset` boundary now uses `prepare_evaluator_storage_binding_for_set()` and `restore_evaluator_storage_binding_after_set(...)`.
+- This narrows the amount of binding-lifecycle choreography embedded in the body of `set()`.
+
+Purpose:
+- keep Phase C moving by isolating the most special-case ownership transition remaining in `Position`
+- make the eventual relocation of binding ownership less tied to the implementation details of `set()`
+
+Verification note:
+- `make -C source tournament APPLE_CPU=native -j4` succeeds
+- the resulting tournament binary passes `usi`, `isready`, `position startpos`, short `go movetime`, `quit`, and a short self-play smoke test
+
 ## Non-Goals For The First Pass
 
 Do not start by:
