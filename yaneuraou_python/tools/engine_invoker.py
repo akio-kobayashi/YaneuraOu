@@ -12,8 +12,7 @@ import queue
 try:
     import yaml
 except ImportError:
-    print("PyYAML is not installed. Please install it with 'pip install pyyaml'")
-    sys.exit(1)
+    yaml = None
 
 from enum import Enum, auto
 
@@ -285,7 +284,8 @@ def read_engine_output(engine_idx, proc, message_queue):
 #  opt2       : 勝敗の表示の先頭にT2,b2000 のように対局条件を文字列化して突っ込む用。
 #  book_moves : 定跡の手数
 def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_moves,save_candidates,
-		alt_move_prob, alt_move_margin_cp, alt_move_temperature):
+		alt_move_prob, alt_move_margin_cp, alt_move_temperature, result_callback=None, stop_predicate=None,
+		paired_openings=False):
 
 	win = lose = draw = 0
 	win_black = win_white = 0
@@ -305,6 +305,9 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 	gameover_reasons = [""] * threads
 	moves = [0] * threads
 	turns = [0] * threads
+	current_book_indices = [0] * threads
+	current_pair_indices = [0] * threads
+	next_pair_index = 0
 
 	# エンジンプロセスごとの状態
 	procs = [None] * (threads * 2)
@@ -417,10 +420,12 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 
 		go_times[i] = time.time()
 
-	def usinewgame_cmd(i,sfen_no):
+	def usinewgame_cmd(i,sfen_no,pair_index):
 		p = procs[i]
 		send_cmd(i,"usinewgame")
 		sfens[i//2] = book_sfens[sfen_no]
+		current_book_indices[i//2] = sfen_no
+		current_pair_indices[i//2] = pair_index
 		moves[i//2] = 0
 		candidate_values[i//2] = []
 		selected_move_meta[i//2] = []
@@ -511,9 +516,17 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 					# 両方のエンジンがstart状態になったら対局開始
 					if states[engine_idx^1] == EngineState.START:
 						# isreadyで待っていた両方のエンジンに対してusinewgameを送る
-						usinewgame_cmd(engine_idx, sfen_no)
-						usinewgame_cmd(engine_idx^1, sfen_no)
-						sfen_no = (sfen_no + 1) % len(book_sfens)
+						thread_idx = engine_idx // 2
+						if paired_openings and turns[thread_idx] == 1:
+							assigned_sfen_no = current_book_indices[thread_idx]
+							assigned_pair_index = current_pair_indices[thread_idx]
+						else:
+							assigned_sfen_no = sfen_no
+							assigned_pair_index = next_pair_index
+							sfen_no = (sfen_no + 1) % len(book_sfens)
+							next_pair_index += 1
+						usinewgame_cmd(engine_idx, assigned_sfen_no, assigned_pair_index)
+						usinewgame_cmd(engine_idx^1, assigned_sfen_no, assigned_pair_index)
 
 						# 先手→後手、交互に行う。
 						go_cmd((engine_idx & ~1) + turns[engine_idx//2])
@@ -633,9 +646,9 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 					if KifOutput:
 						kif_file.write("startpos moves " + sfens[engine_idx//2] + "\n")
 						kif_file.write(eval_values[engine_idx//2] + "\n")
+					black_engine = 1 if turns[engine_idx//2] == 0 else 2
+					white_engine = 2 if black_engine == 1 else 1
 					if candidate_file:
-						black_engine = 1 if turns[engine_idx//2] == 0 else 2
-						white_engine = 2 if black_engine == 1 else 1
 						record = {
 							"moves": sfens[engine_idx//2].split(),
 							"eval_values": eval_values[engine_idx//2].split(),
@@ -649,6 +662,17 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 							"termination_reason": gameover_reasons[engine_idx//2],
 						}
 						candidate_file.write(json.dumps(record, ensure_ascii=False) + "\n")
+					if result_callback:
+						result_callback({
+							"game_index": win + lose + draw,
+							"book_index": current_book_indices[engine_idx//2],
+							"pair_index": current_pair_indices[engine_idx//2],
+							"result": gameover,
+							"black_engine": black_engine,
+							"white_engine": white_engine,
+							"termination_reason": gameover_reasons[engine_idx//2],
+							"moves": moves[engine_idx//2],
+						})
 					turns[engine_idx//2] = turns[engine_idx//2] ^ 1 # 手番を交代
 
 			elif message['type'] == 'terminated':
@@ -692,6 +716,17 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 		# 状態が更新されたら、全体の対局数チェックと途中結果の出力
 		if update:
 			loop_count = win + lose + draw
+			if stop_predicate and stop_predicate(win, lose, draw):
+				for p in procs:
+					if p and p.poll() is None:
+						p.terminate()
+				if FileLogging:
+					log_file.close()
+				if KifOutput:
+					kif_file.close()
+				if candidate_file:
+					candidate_file.close()
+				return win, lose, draw, win_black, win_white
 			if loop_count >= loop :
 				# 指定のloop回数に達したので終了する。
 				for p in procs:
@@ -792,6 +827,9 @@ def main():
 
 	# 2. 設定ファイルがあれば読み込んでマージ
 	if args.config:
+		if yaml is None:
+			print("PyYAML is required when using --config. Please install it with 'pip install pyyaml'")
+			sys.exit(1)
 		try:
 			with open(args.config, 'r') as f:
 				config_from_file = yaml.safe_load(f)
