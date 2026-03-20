@@ -494,22 +494,8 @@ def main():
         print(start_line(start_info))
         sys.stdout.flush()
 
-    def move_line(move_info):
-        parts = [
-            "ply",
-            f"thread={move_info['thread_index']}",
-            f"book={move_info['book_index']}",
-        ]
-        if paired_openings:
-            parts.append(f"pair={move_info['pair_index']}")
-        parts.append(f"ply={move_info['ply']}")
-        parts.append(f"side={'black' if move_info['side_to_move'] == 0 else 'white'}")
-        parts.append(f"move={move_info['move']}")
-        return " ".join(parts)
-
     def on_move(move_info):
-        print(move_line(move_info))
-        sys.stdout.flush()
+        return None
 
     def on_result(game_info):
         unit_completed = tracker.update(game_info)
