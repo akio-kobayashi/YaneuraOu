@@ -335,6 +335,14 @@ Current status:
   2. the remaining profiled hotspots have no clear vendor-neutral improvement,
   3. and further work is better explained as Apple Silicon-specific or
      AMD-specific tuning under Phase E/F.
+- Current closeout status:
+  - recent 3-run tournament `bench` measurements on Apple Silicon were
+    `1174286`, `1174096`, and `1203043` nps, with median `1174286`
+  - the retained Phase D wins remain valid, but additional common-path
+    experiments have not produced repeatable gains
+  - Phase D is therefore effectively closed for now, and the next useful work
+    should start in Phase E or Phase F rather than continuing broad
+    vendor-neutral tuning
 
 ### Phase E: Apple Silicon specialization
 - Treat Apple Silicon as a first-class optimization target rather than relying
@@ -388,7 +396,8 @@ The following are out of scope for this branch:
 ## Immediate Next Step
 
 The next implementation slice on this branch should be:
-- continue Phase D only on profiled hotspots,
+- start Phase E or Phase F from a fresh profile rather than reopening broad
+  Phase D tuning,
 - separate vendor-neutral wins from Apple Silicon-specific and AMD-specific wins,
 - keep NNUE accumulator locality unchanged unless a replacement layout proves bench-neutral or better,
 - reject ownership-only churn that does not improve measured locality or speed,
