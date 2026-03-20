@@ -665,7 +665,7 @@ OBJC_OBJECTS = $(addprefix $(OBJDIR)/, $(OBJC_SOURCES:.mm=.o))
 DEPENDS  = $(OBJECTS:.o=.d)
 
 all: clean $(TARGET)
-.PHONY : all normal evallearn tournament profile_tournament prof profgen profuse pgo clean
+.PHONY : all normal evallearn tournament profile_tournament vector_report_tournament prof profgen profuse pgo pgo_tournament_gen pgo_tournament_use pgo_tournament clean
 
 $(TARGET): $(OBJECTS) $(CUDA_OBJECTS) $(OBJC_OBJECTS)
 	$(COMPILER) -o $@ $^ $(LDFLAGS) $(CPPFLAGS) $(LIBS)
@@ -709,6 +709,11 @@ tournament: run_python_script
 profile_tournament: run_python_script
 	$(MAKE) OBJDIR=../obj/profile_tournament CPPFLAGS='$(CPPFLAGS) $(LTOFLAGS) -DFOR_TOURNAMENT -g -fno-omit-frame-pointer' LDFLAGS='$(subst -Wl$(COMMA)-s,,$(LDFLAGS)) $(LTOFLAGS)' $(TARGET)
 
+# Apple Silicon向けベクトル化レポート用トーナメントビルド
+# 最適化は維持したまま clang の vectorization report を出力する。
+vector_report_tournament: run_python_script
+	$(MAKE) OBJDIR=../obj/vector_report_tournament CPPFLAGS='$(CPPFLAGS) $(LTOFLAGS) -DFOR_TOURNAMENT -g -fno-omit-frame-pointer -Rpass=loop-vectorize -Rpass-missed=loop-vectorize -Rpass-analysis=loop-vectorize' LDFLAGS='$(subst -Wl$(COMMA)-s,,$(LDFLAGS)) $(LTOFLAGS)' $(TARGET)
+
 #　とりあえずPGOはAVX2とSSE4.2専用
 prof:
 	$(MAKE) CPPFLAGS='$(CPPFLAGS) -pg' tournament
@@ -724,6 +729,20 @@ pgo:
 	@./$(TARGET) EvalDir ../build/eval , bench , quit
 	@touch $(SOURCES)
 	$(MAKE) profuse
+
+# Apple Silicon向けのtournament PGO
+# 1. profile生成付きのtournamentバイナリを作る
+# 2. そのバイナリでbenchを回してprofraw/profdataを蓄積する
+# 3. profile-use付きのtournamentバイナリを作る
+pgo_tournament_gen: run_python_script
+	$(MAKE) OBJDIR=../obj/pgo_tournament_gen CPPFLAGS='$(CPPFLAGS) $(LTOFLAGS) -DFOR_TOURNAMENT -fprofile-generate' LDFLAGS='$(LDFLAGS) $(LTOFLAGS) -fprofile-generate' $(TARGET)
+
+pgo_tournament_use: run_python_script
+	$(MAKE) OBJDIR=../obj/pgo_tournament_use CPPFLAGS='$(CPPFLAGS) $(LTOFLAGS) -DFOR_TOURNAMENT -fprofile-use' LDFLAGS='$(LDFLAGS) $(LTOFLAGS) -fprofile-use' $(TARGET)
+
+pgo_tournament: pgo_tournament_gen
+	printf 'usi\nsetoption name EvalDir value $(CURDIR)/eval\nsetoption name Threads value 1\nisready\nbench\nquit\n' | ./$(TARGET)
+	$(MAKE) pgo_tournament_use
 
 clean:
 	rm -rf ../obj/default ../obj/normal ../obj/evallearn ../obj/tournament
