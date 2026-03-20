@@ -313,6 +313,9 @@ Current status:
 - The first retained Phase D wins are small and targeted:
   - relaxed hot-loop stop-flag loads in tournament search
   - `MovePicker::next_move()` direct loops in place of the generic `select()` helper
+- Additional common-path experiments such as per-node counter publication and
+  broader runtime-state reshaping have been tried and rejected when they
+  regressed tournament `bench`.
 - The practical hotspot set is now explicit:
   - `YaneuraOuWorker::search<>`
   - `YaneuraOuWorker::iterative_deepening()`
@@ -327,6 +330,11 @@ Current status:
   2. change one hotspot,
   3. keep the change only if median `bench` is non-regressive,
   4. otherwise revert and move on.
+- Phase D should be considered ready to close once:
+  1. the retained common-path wins are documented and stable,
+  2. the remaining profiled hotspots have no clear vendor-neutral improvement,
+  3. and further work is better explained as Apple Silicon-specific or
+     AMD-specific tuning under Phase E/F.
 
 ### Phase E: Apple Silicon specialization
 - Treat Apple Silicon as a first-class optimization target rather than relying
