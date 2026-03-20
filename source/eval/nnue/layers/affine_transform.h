@@ -145,7 +145,7 @@ static void affine_transform_unaligned(std::int32_t*       output,
             sum               = vpadalq_s16(sum, product);
         }
 		
-        output[i] = sum[0] + sum[1] + sum[2] + sum[3];
+        output[i] = Simd::neon_m128_reduce_add_epi32(sum);
 
 #endif
     }

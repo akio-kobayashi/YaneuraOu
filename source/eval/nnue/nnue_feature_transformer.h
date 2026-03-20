@@ -84,9 +84,14 @@ class FeatureTransformer {
 	static constexpr IndexType kHalfDimensions = kTransformedFeatureDimensions;
 
 #if defined(VECTOR)
-	//static constexpr IndexType kTileHeight = kNumRegs * sizeof(vec_t) / 2;
-	//static_assert(kHalfDimensions % kTileHeight == 0, "kTileHeight must divide kHalfDimensions");
-	// ⇨  AVX-512でこの制約守れないっぽ。
+		//static constexpr IndexType kTileHeight = kNumRegs * sizeof(vec_t) / 2;
+		//static_assert(kHalfDimensions % kTileHeight == 0, "kTileHeight must divide kHalfDimensions");
+		// ⇨  AVX-512でこの制約守れないっぽ。
+#if defined(USE_AVX512)
+		static constexpr IndexType kNumVectorChunks = kHalfDimensions / kSimdWidth;
+#else
+		static constexpr IndexType kNumVectorChunks = kHalfDimensions / (kSimdWidth / 2);
+#endif
 #endif
 
    public:
@@ -288,24 +293,17 @@ class FeatureTransformer {
 			RawFeatures::AppendActiveIndices(pos, kRefreshTriggers[i], active_indices);
 			for (Color perspective : {BLACK, WHITE}) {
 #if defined(VECTOR)
-				if (i == 0) {
-					std::memcpy(accumulator.accumulation[perspective][i], biases_, kHalfDimensions * sizeof(BiasType));
-				} else {
-					std::memset(accumulator.accumulation[perspective][i], 0, kHalfDimensions * sizeof(BiasType));
-				}
-				for (const auto index : active_indices[perspective]) {
-					const IndexType offset = kHalfDimensions * index;
-					auto accumulation      = reinterpret_cast<vec_t*>(&accumulator.accumulation[perspective][i][0]);
-					auto column            = reinterpret_cast<const vec_t*>(&weights_[offset]);
-#if defined(USE_AVX512)
-					constexpr IndexType kNumChunks = kHalfDimensions / kSimdWidth;
-#else
-					constexpr IndexType kNumChunks = kHalfDimensions / (kSimdWidth / 2);
-#endif
-					for (IndexType j = 0; j < kNumChunks; ++j) {
-						accumulation[j] = vec_add_16(accumulation[j], column[j]);
+					if (i == 0) {
+						std::memcpy(accumulator.accumulation[perspective][i], biases_, kHalfDimensions * sizeof(BiasType));
+					} else {
+						std::memset(accumulator.accumulation[perspective][i], 0, kHalfDimensions * sizeof(BiasType));
 					}
-				}
+					auto accumulation = vector_accumulation_ptr(&accumulator.accumulation[perspective][i][0]);
+					for (const auto index : active_indices[perspective]) {
+						const IndexType offset = kHalfDimensions * index;
+						auto column            = vector_weight_ptr(&weights_[offset]);
+						add_vector_column(accumulation, column);
+					}
 #else
 				if (i == 0) {
 					std::memcpy(accumulator.accumulation[perspective][i], biases_, kHalfDimensions * sizeof(BiasType));
@@ -339,16 +337,11 @@ class FeatureTransformer {
 			Features::IndexList removed_indices[2], added_indices[2];
 			bool                reset[2];
 			RawFeatures::AppendChangedIndices(pos, kRefreshTriggers[i], removed_indices, added_indices, reset);
-			for (Color perspective : {BLACK, WHITE}) {
+				for (Color perspective : {BLACK, WHITE}) {
 #if defined(VECTOR)
-#if defined(USE_AVX512)
-				constexpr IndexType kNumChunks = kHalfDimensions / kSimdWidth;
-#else
-				constexpr IndexType kNumChunks = kHalfDimensions / (kSimdWidth / 2);
+					auto accumulation = vector_accumulation_ptr(&accumulator.accumulation[perspective][i][0]);
 #endif
-				auto accumulation              = reinterpret_cast<vec_t*>(&accumulator.accumulation[perspective][i][0]);
-#endif
-				if (reset[perspective]) {
+					if (reset[perspective]) {
 					if (i == 0) {
 						std::memcpy(accumulator.accumulation[perspective][i], biases_,
 						            kHalfDimensions * sizeof(BiasType));
@@ -358,15 +351,13 @@ class FeatureTransformer {
 				} else {
 					// Difference calculation for the feature amount changed from 1 to 0
 					// 1から0に変化した特徴量に関する差分計算
-					std::memcpy(accumulator.accumulation[perspective][i], prev_accumulator.accumulation[perspective][i],
-					            kHalfDimensions * sizeof(BiasType));
-					for (const auto index : removed_indices[perspective]) {
-						const IndexType offset = kHalfDimensions * index;
+						std::memcpy(accumulator.accumulation[perspective][i], prev_accumulator.accumulation[perspective][i],
+						            kHalfDimensions * sizeof(BiasType));
+						for (const auto index : removed_indices[perspective]) {
+							const IndexType offset = kHalfDimensions * index;
 #if defined(VECTOR)
-						auto column = reinterpret_cast<const vec_t*>(&weights_[offset]);
-						for (IndexType j = 0; j < kNumChunks; ++j) {
-							accumulation[j] = vec_sub_16(accumulation[j], column[j]);
-						}
+							auto column = vector_weight_ptr(&weights_[offset]);
+							sub_vector_column(accumulation, column);
 #else
 						for (IndexType j = 0; j < kHalfDimensions; ++j) {
 							accumulator.accumulation[perspective][i][j] -= weights_[offset + j];
@@ -377,13 +368,11 @@ class FeatureTransformer {
 				{
 					// Difference calculation for features that changed from 0 to 1
 					// 0から1に変化した特徴量に関する差分計算
-					for (const auto index : added_indices[perspective]) {
-						const IndexType offset = kHalfDimensions * index;
+						for (const auto index : added_indices[perspective]) {
+							const IndexType offset = kHalfDimensions * index;
 #if defined(VECTOR)
-						auto column = reinterpret_cast<const vec_t*>(&weights_[offset]);
-						for (IndexType j = 0; j < kNumChunks; ++j) {
-							accumulation[j] = vec_add_16(accumulation[j], column[j]);
-						}
+							auto column = vector_weight_ptr(&weights_[offset]);
+							add_vector_column(accumulation, column);
 #else
 						for (IndexType j = 0; j < kHalfDimensions; ++j) {
 							accumulator.accumulation[perspective][i][j] += weights_[offset + j];
@@ -399,12 +388,34 @@ class FeatureTransformer {
 		accumulator.computed_score = false;
 	}
 
-	// parameter type
-	// パラメータの型
-	using BiasType   = std::int16_t;
-	using WeightType = std::int16_t;
+		// parameter type
+		// パラメータの型
+		using BiasType   = std::int16_t;
+		using WeightType = std::int16_t;
 
-	// Make the learning class a friend
+#if defined(VECTOR)
+		static vec_t* vector_accumulation_ptr(BiasType* ptr) {
+			return reinterpret_cast<vec_t*>(__builtin_assume_aligned(ptr, kCacheLineSize));
+		}
+
+		static const vec_t* vector_weight_ptr(const WeightType* ptr) {
+			return reinterpret_cast<const vec_t*>(__builtin_assume_aligned(ptr, kCacheLineSize));
+		}
+
+		static void add_vector_column(vec_t* accumulation, const vec_t* column) {
+			for (IndexType j = 0; j < kNumVectorChunks; ++j) {
+				accumulation[j] = vec_add_16(accumulation[j], column[j]);
+			}
+		}
+
+		static void sub_vector_column(vec_t* accumulation, const vec_t* column) {
+			for (IndexType j = 0; j < kNumVectorChunks; ++j) {
+				accumulation[j] = vec_sub_16(accumulation[j], column[j]);
+			}
+		}
+#endif
+
+		// Make the learning class a friend
 	// 学習用クラスをfriendにする
 	friend class Trainer<FeatureTransformer>;
 

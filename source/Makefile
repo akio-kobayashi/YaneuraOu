@@ -644,7 +644,7 @@ else ifeq ($(TARGET_CPU),APPLEAVX2)
 else ifeq ($(TARGET_CPU),APPLESSE42)
 	CPPFLAGS += -DIS_64BIT -DUSE_SSE42 -target x86_64-apple-macos11
 else ifeq ($(TARGET_CPU),APPLEM1)
-	CPPFLAGS += -DIS_64BIT -DUSE_NEON -target arm64-apple-macos11
+	CPPFLAGS += -DIS_64BIT -DUSE_NEON=8 -DUSE_NEON_DOTPROD -target arm64-apple-macos11
 	ifneq ($(strip $(APPLE_CPU)),)
 		CPPFLAGS += -mcpu=$(APPLE_CPU)
 	endif
@@ -734,14 +734,19 @@ pgo:
 # 1. profile生成付きのtournamentバイナリを作る
 # 2. そのバイナリでbenchを回してprofraw/profdataを蓄積する
 # 3. profile-use付きのtournamentバイナリを作る
+PGO_TOURNAMENT_PROFILE_RAW = $(CURDIR)/pgo_tournament.profraw
+PGO_TOURNAMENT_PROFILE_DATA = $(CURDIR)/pgo_tournament.profdata
+
 pgo_tournament_gen: run_python_script
 	$(MAKE) OBJDIR=../obj/pgo_tournament_gen CPPFLAGS='$(CPPFLAGS) $(LTOFLAGS) -DFOR_TOURNAMENT -fprofile-generate' LDFLAGS='$(LDFLAGS) $(LTOFLAGS) -fprofile-generate' $(TARGET)
 
 pgo_tournament_use: run_python_script
-	$(MAKE) OBJDIR=../obj/pgo_tournament_use CPPFLAGS='$(CPPFLAGS) $(LTOFLAGS) -DFOR_TOURNAMENT -fprofile-use' LDFLAGS='$(LDFLAGS) $(LTOFLAGS) -fprofile-use' $(TARGET)
+	$(MAKE) OBJDIR=../obj/pgo_tournament_use CPPFLAGS='$(CPPFLAGS) $(LTOFLAGS) -DFOR_TOURNAMENT -fprofile-use=$(PGO_TOURNAMENT_PROFILE_DATA)' LDFLAGS='$(LDFLAGS) $(LTOFLAGS) -fprofile-use=$(PGO_TOURNAMENT_PROFILE_DATA)' $(TARGET)
 
 pgo_tournament: pgo_tournament_gen
-	printf 'usi\nsetoption name EvalDir value $(CURDIR)/eval\nsetoption name Threads value 1\nisready\nbench\nquit\n' | ./$(TARGET)
+	rm -f $(PGO_TOURNAMENT_PROFILE_RAW) $(PGO_TOURNAMENT_PROFILE_DATA)
+	printf 'usi\nsetoption name EvalDir value $(CURDIR)/eval\nsetoption name Threads value 1\nisready\nbench\nquit\n' | LLVM_PROFILE_FILE="$(PGO_TOURNAMENT_PROFILE_RAW)" ./$(TARGET)
+	$$(xcrun --find llvm-profdata) merge -output=$(PGO_TOURNAMENT_PROFILE_DATA) $(PGO_TOURNAMENT_PROFILE_RAW)
 	$(MAKE) pgo_tournament_use
 
 clean:
