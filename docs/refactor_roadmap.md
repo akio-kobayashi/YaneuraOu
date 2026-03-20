@@ -256,12 +256,17 @@ Current status:
   may move behind compatibility storage, but NNUE accumulator data should remain
   in the hottest practical layout unless a replacement layout proves bench-neutral.
 
-### Phase D: Restructure search/eval state
+### Phase D: Profile-guided common optimization
 - Treat Phase D as a performance experiment phase, not a generalized ownership
   cleanup phase.
 - Keep search hot-path data in the cheapest proven layout unless a replacement
   wins on tournament `bench`.
 - Use optimized-symbol profiling to choose targets before changing code.
+- Treat this phase as CPU-vendor-neutral groundwork:
+  - improve data layout only when it helps both Apple Silicon and AMD, or is at
+    least neutral on one while clearly helping the other
+  - prefer search, move-picking, evaluation, and NNUE hot-path work over
+    generalized cleanup
 - Require every retained slice to pass:
   - 3-run median tournament `bench`
   - `usi` / `isready` / short `go` / `quit`
@@ -323,12 +328,42 @@ Current status:
   3. keep the change only if median `bench` is non-regressive,
   4. otherwise revert and move on.
 
-### Phase E: Replace macro usage in non-hot layers
+### Phase E: Apple Silicon specialization
+- Treat Apple Silicon as a first-class optimization target rather than relying
+  only on vendor-neutral cleanup.
+- Focus on hotspots already confirmed in Phase D:
+  - `YaneuraOuWorker::search<>`
+  - `MovePicker::next_move()`
+  - `Eval::evaluate()`
+  - NNUE `AffineTransform::Propagate(...)`
+- Favor changes that are likely to improve clang/LLVM code generation and NEON
+  utilization:
+  - alignment and layout changes for hot blocks
+  - loop structure and unrolling choices that help Apple Silicon cores
+  - avoiding pointer-chasing or ownership patterns that degrade locality on
+    unified-memory systems
+- Validate against the same tournament `bench` / USI / selfplay gates as
+  Phase D, but measure on Apple Silicon first.
+
+### Phase F: AMD specialization
+- Treat AMD optimization as a separate follow-up rather than assuming Apple
+  Silicon wins will transfer unchanged.
+- Reuse the Phase D hotspot list, but evaluate with AMD-specific codegen and
+  profile data.
+- Favor changes that are likely to help Zen-family CPUs:
+  - branch behavior in search and move picking
+  - AVX2/BMI2/POPCNT-friendly evaluation and bitboard paths
+  - data placement that reduces cache misses and false sharing on SMT-heavy
+    systems
+- Keep CPU-specific tuning isolated from vendor-neutral cleanup whenever
+  practical so that Apple Silicon and AMD measurements can diverge cleanly.
+
+### Phase G: Replace macro usage in non-hot layers
 - Convert simple feature checks into typed config helpers.
 - Shrink direct `config.h` includes in leaf modules.
 - Preserve compile-time optimization in hot loops where justified.
 
-### Phase F: Build cleanup
+### Phase H: Build cleanup
 - Remove Visual Studio from the supported build matrix.
 - Provide one maintained non-Visual-Studio build path.
 - Encode CPU targeting and evaluator selection cleanly.
@@ -345,8 +380,8 @@ The following are out of scope for this branch:
 ## Immediate Next Step
 
 The next implementation slice on this branch should be:
-- profile the optimized tournament build before touching code,
-- focus only on confirmed hotspots in search, move picking, evaluation, or NNUE propagation,
+- continue Phase D only on profiled hotspots,
+- separate vendor-neutral wins from Apple Silicon-specific and AMD-specific wins,
 - keep NNUE accumulator locality unchanged unless a replacement layout proves bench-neutral or better,
 - reject ownership-only churn that does not improve measured locality or speed,
 - and verify each retained slice against [`docs/eval_value_contract.md`](/Users/akio/Documents/GitHub/YaneuraOu/docs/eval_value_contract.md).
