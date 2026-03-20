@@ -182,6 +182,7 @@ def create_option(engines,engine_threads,evals,times,hashes,multipv,PARAMETERS_L
 		inc_time = 0
 		total_time = 0
 		depth_time = 0
+		nodes_limit = 0
 
 		nodes_time = False
 
@@ -204,6 +205,8 @@ def create_option(engines,engine_threads,evals,times,hashes,multipv,PARAMETERS_L
 				total_time = t
 			elif c == "d":
 				depth_time = t
+			elif c == "n":
+				nodes_limit = t
 
 		option = []
 		if ("Yane" in engines[i]):
@@ -213,6 +216,8 @@ def create_option(engines,engine_threads,evals,times,hashes,multipv,PARAMETERS_L
 				option.append("go btime REST_TIME wtime REST_TIME inc " + str(inc_time))
 			elif depth_time:
 				option.append("go depth " + str(depth_time))
+			elif nodes_limit:
+				option.append("go nodes " + str(nodes_limit))
 			else:
 				option.append("go btime REST_TIME wtime REST_TIME byoyomi " + str(byoyomi))
 
@@ -254,7 +259,7 @@ def create_option(engines,engine_threads,evals,times,hashes,multipv,PARAMETERS_L
 
 		options.append(option)
 
-		options2.append([total_time,inc_time,byoyomi,rtime,depth_time])
+		options2.append([total_time,inc_time,byoyomi,rtime,depth_time,nodes_limit])
 
 	options.append(options2[0])
 	options.append(options2[1])
@@ -797,7 +802,7 @@ def main():
 	parser.add_argument('--parallel_games', type=int, default=1, help="Number of games to run in parallel.")
 	parser.add_argument('--engine_threads', type=int, default=1, help="Number of threads for each engine process.")
 	parser.add_argument('--loop', type=int, default=100, help="Total number of games to play.")
-	parser.add_argument('--time', type=str, default="b1000", help="Time control settings (e.g., 'b1000', 'r100', 't300000/i3000').")
+	parser.add_argument('--time', type=str, default="b1000", help="Time control settings (e.g., 'b1000', 'r100', 't300000/i3000', 'd8', 'n100000').")
 	parser.add_argument('--hash1', type=str, default="128", help="Hash size for engine 1 (in MB).")
 	parser.add_argument('--hash2', type=str, default="128", help="Hash size for engine 2 (in MB).")
 	parser.add_argument('--multipv', type=int, default=1, help="Number of candidate lines to request from the engine.")

@@ -7,7 +7,11 @@ from typing import Optional
 def load_cshogi():
     try:
         import cshogi
-        from cshogi import CSA
+        try:
+            from cshogi import CSA
+        except Exception:
+            import importlib
+            CSA = importlib.import_module("cshogi.CSA")
         return cshogi, CSA
     except Exception as exc:
         raise SystemExit(

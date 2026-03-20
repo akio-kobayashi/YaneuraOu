@@ -43,6 +43,14 @@ for info in moves_info:
 
 If `--book_file` is omitted, games start from the normal initial position. If you want to start from a prepared opening set, pass an SFEN file under `home/book` with `--book_file`.
 
+The `--time` option accepts several modes:
+
+- `b100`: byoyomi in milliseconds
+- `d8`: fixed depth
+- `n100000`: fixed node count
+- `t300000/i3000`: total time with increment
+- `r100`: random-time style mode supported by legacy scripts
+
 When `--multipv` and `--save_candidates` are enabled, the tool keeps the existing `.sfen` output and also writes a JSONL sidecar file containing:
 
 - played move sequence
@@ -103,6 +111,49 @@ python yaneuraou_python/tools/engine_invoker.py \
   --book_file records2016_10818.sfen \
   --book_moves 24
 ```
+
+## Bulk Self-Play Runner
+
+`tools/bulk_selfplay.py` launches multiple `engine_invoker.py` workers in parallel and writes each worker output into its own directory. This is the recommended way to generate a large number of `.sfen` / `.jsonl` files and optionally convert them into CSA.
+
+Example using fixed depth:
+
+```bash
+python yaneuraou_python/tools/bulk_selfplay.py \
+  --home /path/to/home \
+  --engine1 YaneuraOu-native \
+  --eval1 eval \
+  --engine2 YaneuraOu-native \
+  --eval2 eval \
+  --output-root out_selfplay \
+  --workers 4 \
+  --games-per-worker 2000 \
+  --parallel-games 2 \
+  --engine-threads 1 \
+  --depth 8
+```
+
+Example using fixed nodes and automatic CSA conversion:
+
+```bash
+python yaneuraou_python/tools/bulk_selfplay.py \
+  --home /path/to/home \
+  --engine1 YaneuraOu-native \
+  --eval1 eval \
+  --engine2 YaneuraOu-native \
+  --eval2 eval \
+  --output-root out_selfplay \
+  --workers 4 \
+  --games-per-worker 2000 \
+  --parallel-games 2 \
+  --engine-threads 1 \
+  --nodes 100000 \
+  --convert-csa \
+  --engine1-name YaneuraOu \
+  --engine2-name YaneuraOu
+```
+
+Each worker writes into `output-root/worker_XX/`. When `--convert-csa` is enabled, CSA files are written under `output-root/worker_XX/csa/`.
 
 ## SPRT Match Tool
 
