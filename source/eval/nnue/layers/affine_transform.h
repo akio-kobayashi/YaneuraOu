@@ -365,24 +365,62 @@ class AffineTransform {
 
 				const auto       input32 = reinterpret_cast<const std::int32_t*>(input);
 				const int32x4_t* biasvec = reinterpret_cast<const int32x4_t*>(biases_);
-				int32x4_t        acc[kNumRegs];
+				int32x4_t* outptr = reinterpret_cast<int32x4_t*>(output);
 
-				for (IndexType k = 0; k < kNumRegs; ++k)
-					acc[k] = biasvec[k];
-				
-				for (IndexType i = 0; i < kNumChunks; ++i)
+				if constexpr (kOutputDimensions == 32)
 				{
-					const int32x4_t in = vdupq_n_s32(input32[i]);
-					const auto  col = reinterpret_cast<const int32x4_t*>(&weights_[i * kOutputDimensions * 4]);
+					int32x4_t acc0 = biasvec[0];
+					int32x4_t acc1 = biasvec[1];
+					int32x4_t acc2 = biasvec[2];
+					int32x4_t acc3 = biasvec[3];
+					int32x4_t acc4 = biasvec[4];
+					int32x4_t acc5 = biasvec[5];
+					int32x4_t acc6 = biasvec[6];
+					int32x4_t acc7 = biasvec[7];
+
+					for (IndexType i = 0; i < kNumChunks; ++i)
+					{
+						const int32x4_t in = vdupq_n_s32(input32[i]);
+						const auto col = reinterpret_cast<const int32x4_t*>(&weights_[i * kOutputDimensions * 4]);
+
+						Simd::dotprod_m128_add_dpbusd_epi32(acc0, in, col[0]);
+						Simd::dotprod_m128_add_dpbusd_epi32(acc1, in, col[1]);
+						Simd::dotprod_m128_add_dpbusd_epi32(acc2, in, col[2]);
+						Simd::dotprod_m128_add_dpbusd_epi32(acc3, in, col[3]);
+						Simd::dotprod_m128_add_dpbusd_epi32(acc4, in, col[4]);
+						Simd::dotprod_m128_add_dpbusd_epi32(acc5, in, col[5]);
+						Simd::dotprod_m128_add_dpbusd_epi32(acc6, in, col[6]);
+						Simd::dotprod_m128_add_dpbusd_epi32(acc7, in, col[7]);
+					}
+
+					outptr[0] = acc0;
+					outptr[1] = acc1;
+					outptr[2] = acc2;
+					outptr[3] = acc3;
+					outptr[4] = acc4;
+					outptr[5] = acc5;
+					outptr[6] = acc6;
+					outptr[7] = acc7;
+				}
+				else
+				{
+					int32x4_t acc[kNumRegs];
 
 					for (IndexType k = 0; k < kNumRegs; ++k)
-						Simd::dotprod_m128_add_dpbusd_epi32(acc[k], in, col[k]);
-				}
+						acc[k] = biasvec[k];
 
-				int32x4_t* outptr = reinterpret_cast<int32x4_t*>(output);
-				
-				for (IndexType k = 0; k < kNumRegs; ++k)
-					outptr[k] = acc[k];
+					for (IndexType i = 0; i < kNumChunks; ++i)
+					{
+						const int32x4_t in = vdupq_n_s32(input32[i]);
+						const auto col = reinterpret_cast<const int32x4_t*>(&weights_[i * kOutputDimensions * 4]);
+
+						for (IndexType k = 0; k < kNumRegs; ++k)
+							Simd::dotprod_m128_add_dpbusd_epi32(acc[k], in, col[k]);
+					}
+
+					for (IndexType k = 0; k < kNumRegs; ++k)
+						outptr[k] = acc[k];
+				}
 			}
 			else
 #endif
