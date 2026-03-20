@@ -9,7 +9,13 @@ try:
 except ImportError:
     yaml = None
 
-from engine_invoker import GameResult, create_option, engine_to_full, vs_match
+from engine_invoker import (
+    GameResult,
+    create_option,
+    load_book_positions,
+    resolve_engine_binary_and_eval,
+    vs_match,
+)
 
 
 def elo_to_score(elo):
@@ -340,35 +346,10 @@ def load_config(parser, args):
 
 
 def load_book_sfens(home, book_file_path, book_moves, rand_book):
-    if not book_file_path:
-        return [""]
-
-    resolved_book_file = book_file_path
-    if not os.path.isabs(resolved_book_file):
-        resolved_book_file = os.path.join(home, "book", resolved_book_file)
-
-    book_sfens = []
-    with open(resolved_book_file, "r") as book_file:
-        count = 1
-        for sfen in book_file:
-            parts = sfen.split()
-            sequence = []
-            for i in range(book_moves):
-                try:
-                    sequence.append(parts[i + 2])
-                except Exception:
-                    print(f"Error! in {os.path.basename(resolved_book_file)} line = {count}")
-                    break
-            book_sfens.append(" ".join(sequence))
-            count += 1
-            if count % 100 == 0:
-                sys.stdout.write(".")
-                sys.stdout.flush()
-    print()
-
-    if rand_book and len(book_sfens) > 1:
-        random.shuffle(book_sfens)
-    return book_sfens
+    book_positions = load_book_positions(home, book_file_path, book_moves)
+    if book_file_path and len(book_positions) > 1:
+        random.shuffle(book_positions)
+    return book_positions
 
 
 def build_parser():
@@ -378,11 +359,11 @@ def build_parser():
     )
 
     parser.add_argument("--config", type=str, help="Path to a YAML configuration file.")
-    parser.add_argument("--home", type=str, help="Path to the home directory containing 'exe' and 'eval' folders.")
+    parser.add_argument("--home", type=str, help="Base directory used to resolve relative engine/book paths.")
     parser.add_argument("--engine1", type=str, help="Path or name of engine 1.")
-    parser.add_argument("--eval1", type=str, help="Name of the evaluation function folder for engine 1.")
+    parser.add_argument("--eval1", type=str, default="", help="Optional evaluation directory for engine 1.")
     parser.add_argument("--engine2", type=str, help="Path or name of engine 2.")
-    parser.add_argument("--eval2", type=str, help="Name of the evaluation function folder for engine 2.")
+    parser.add_argument("--eval2", type=str, default="", help="Optional evaluation directory for engine 2.")
 
     parser.add_argument("--parallel_games", type=int, default=1, help="Number of games to run in parallel.")
     parser.add_argument("--engine_threads", type=int, default=1, help="Number of threads for each engine process.")
@@ -437,7 +418,7 @@ def main():
     args = parser.parse_args()
     config = load_config(parser, args)
 
-    required_args = ["home", "engine1", "eval1", "engine2", "eval2"]
+    required_args = ["home", "engine1", "engine2"]
     for arg in required_args:
         if not config.get(arg):
             print(f"Error: Missing required argument: --{arg}.")
@@ -447,17 +428,11 @@ def main():
     paired_openings = config["sprt_mode"] == "pentanomial"
 
     home = config["home"]
-    engine1 = engine_to_full(config["engine1"])
-    engine2 = engine_to_full(config["engine2"])
+    engine1, eval1_dir = resolve_engine_binary_and_eval(home, config["engine1"], config["eval1"])
+    engine2, eval2_dir = resolve_engine_binary_and_eval(home, config["engine2"], config["eval2"])
     engines = (engine1, engine2)
-    engines_full = (
-        os.path.join(home, "exe", engine1),
-        os.path.join(home, "exe", engine2),
-    )
-    evals_full = (
-        os.path.join(home, "eval", config["eval1"]),
-        os.path.join(home, "eval", config["eval2"]),
-    )
+    engines_full = engines
+    evals_full = (eval1_dir, eval2_dir)
     book_sfens = load_book_sfens(home, config["book_file"], config["book_moves"], config["rand_book"])
     options = create_option(
         engines,
@@ -470,8 +445,8 @@ def main():
     )
     opt2 = f"T{config['engine_threads']},{config['time']},SPRT"
 
-    print("engine1        :", engine1, "eval =", config["eval1"])
-    print("engine2        :", engine2, "eval =", config["eval2"])
+    print("engine1        :", engine1, "eval =", eval1_dir if eval1_dir else "(engine default)")
+    print("engine2        :", engine2, "eval =", eval2_dir if eval2_dir else "(engine default)")
     print("parallel_games :", config["parallel_games"])
     print("max_games      :", config["max_games"])
     print("time           :", config["time"])
@@ -489,8 +464,57 @@ def main():
         print("min_games      :", config["min_games"])
     sys.stdout.flush()
 
+    def progress_line(game_info):
+        result_name = game_info["result"].name
+        parts = [
+            f"game={game_info['game_index']}",
+            f"book={game_info['book_index']}",
+            f"moves={game_info['moves']}",
+            f"result={result_name}",
+            f"term={game_info['termination_reason']}",
+        ]
+        if paired_openings:
+            parts.append(f"pair={game_info['pair_index']}")
+            parts.append(f"complete={tracker.completed_pairs}")
+        parts.append(f"llr={tracker.llr:.4f}")
+        return " ".join(parts)
+
+    def start_line(start_info):
+        parts = [
+            "start",
+            f"thread={start_info['thread_index']}",
+            f"book={start_info['book_index']}",
+        ]
+        if paired_openings:
+            parts.append(f"pair={start_info['pair_index']}")
+        parts.append(f"stm={'black' if start_info['side_to_move'] == 0 else 'white'}")
+        return " ".join(parts)
+
+    def on_start(start_info):
+        print(start_line(start_info))
+        sys.stdout.flush()
+
+    def move_line(move_info):
+        parts = [
+            "ply",
+            f"thread={move_info['thread_index']}",
+            f"book={move_info['book_index']}",
+        ]
+        if paired_openings:
+            parts.append(f"pair={move_info['pair_index']}")
+        parts.append(f"ply={move_info['ply']}")
+        parts.append(f"side={'black' if move_info['side_to_move'] == 0 else 'white'}")
+        parts.append(f"move={move_info['move']}")
+        return " ".join(parts)
+
+    def on_move(move_info):
+        print(move_line(move_info))
+        sys.stdout.flush()
+
     def on_result(game_info):
         unit_completed = tracker.update(game_info)
+        print(progress_line(game_info))
+        sys.stdout.flush()
         if unit_completed and tracker.should_report():
             print(tracker.summary_line())
             print(tracker.model_line())
@@ -513,6 +537,8 @@ def main():
         config["alt_move_margin_cp"],
         config["alt_move_temperature"],
         result_callback=on_result,
+        start_callback=on_start,
+        move_callback=on_move,
         stop_predicate=should_stop,
         paired_openings=paired_openings,
     )

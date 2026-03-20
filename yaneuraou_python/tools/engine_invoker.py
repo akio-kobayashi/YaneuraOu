@@ -162,6 +162,142 @@ def choose_move_from_candidates(bestmove_line, candidate_info_map, alt_move_prob
 	}
 
 
+def parse_book_line(line, book_moves):
+	parts = line.strip().split()
+	if not parts:
+		return None
+
+	if parts[0] == "startpos":
+		move_tokens = []
+		if len(parts) >= 2 and parts[1] == "moves":
+			move_tokens = parts[2:]
+		if book_moves > 0:
+			move_tokens = move_tokens[:book_moves]
+		record_line = "startpos"
+		if move_tokens:
+			record_line += " moves " + " ".join(move_tokens)
+		return {
+			"position_command": "position " + record_line,
+			"record_line": record_line,
+			"initial_move_count": len(move_tokens),
+			"side_to_move": len(move_tokens) & 1,
+		}
+
+	if parts[0] == "sfen":
+		if len(parts) < 5 or parts[2] not in ("b", "w"):
+			return None
+		record_line = " ".join(parts[:5])
+		if len(parts) > 5:
+			if parts[5] != "moves":
+				return None
+			record_line += " moves " + " ".join(parts[6:])
+		return {
+			"position_command": "position " + record_line,
+			"record_line": record_line,
+			"initial_move_count": 0,
+			"side_to_move": 0 if parts[2] == "b" else 1,
+		}
+
+	return None
+
+
+def load_book_positions(home, book_file_path, book_moves):
+	if not book_file_path:
+		return [{
+			"position_command": "position startpos",
+			"record_line": "startpos",
+			"initial_move_count": 0,
+			"side_to_move": 0,
+		}]
+
+	resolved_book_file = book_file_path
+	if not os.path.isabs(resolved_book_file):
+		resolved_book_file = os.path.join(home, "book", resolved_book_file)
+
+	book_positions = []
+	with open(resolved_book_file, "r") as book_file:
+		count = 1
+		for line in book_file:
+			book_position = parse_book_line(line, book_moves)
+			if book_position is None:
+				print("Error! " + " in " + os.path.basename(resolved_book_file) + " line = " + str(count))
+			else:
+				book_positions.append(book_position)
+			count += 1
+			if count % 100 == 0:
+				sys.stdout.write(".")
+				sys.stdout.flush()
+
+	if not book_positions:
+		raise ValueError(f"No valid opening positions found in {resolved_book_file}")
+
+	print()
+	return book_positions
+
+
+def resolve_engine_path(home, engine_path):
+	resolved_engine = engine_to_full(engine_path)
+	if os.path.isabs(resolved_engine):
+		return resolved_engine
+	return os.path.join(home, resolved_engine)
+
+
+def resolve_engine_binary_and_eval(home, engine_path, eval_path):
+	resolved_engine = resolve_engine_path(home, engine_path)
+	engine_dir = resolved_engine if os.path.isdir(resolved_engine) else os.path.dirname(resolved_engine)
+
+	if os.path.isdir(resolved_engine):
+		candidates = [
+			os.path.join(resolved_engine, "YaneuraOu-native"),
+			os.path.join(resolved_engine, "YaneuraOu-by-gcc"),
+			os.path.join(resolved_engine, "YaneuraOu-apple_m2"),
+		]
+		binary_path = ""
+		for candidate in candidates:
+			if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+				binary_path = candidate
+				break
+		if not binary_path:
+			for entry in os.listdir(resolved_engine):
+				candidate = os.path.join(resolved_engine, entry)
+				if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+					binary_path = candidate
+					break
+		if not binary_path:
+			raise FileNotFoundError(f"No executable engine binary found under {resolved_engine}")
+	else:
+		binary_path = resolved_engine
+
+	if eval_path:
+		if os.path.isabs(eval_path):
+			eval_dir = eval_path
+		else:
+			engine_local_eval = os.path.join(engine_dir, eval_path)
+			legacy_eval = os.path.join(home, "eval", eval_path)
+			eval_dir = engine_local_eval if os.path.exists(engine_local_eval) else legacy_eval
+	else:
+		default_engine_eval = os.path.join(engine_dir, "eval")
+		if os.path.exists(default_engine_eval):
+			eval_dir = default_engine_eval
+		else:
+			eval_dir = ""
+
+	return binary_path, eval_dir
+
+
+def expand_eval_dirs(eval_dir):
+	if not eval_dir:
+		return [""]
+	if not os.path.exists(os.path.join(eval_dir, "0")):
+		return [eval_dir]
+	evaldirs = []
+	i = 0
+	while os.path.exists(os.path.join(eval_dir, str(i))):
+		evaldirs.append(os.path.join(eval_dir, str(i)))
+		i += 1
+	return evaldirs
+
+
 # 思考エンジンに対するオプションを生成する。
 def create_option(engines,engine_threads,evals,times,hashes,multipv,PARAMETERS_LOG_FILE_PATH):
 
@@ -288,8 +424,8 @@ def read_engine_output(engine_idx, proc, message_queue):
 #  book_sfens : 定跡
 #  opt2       : 勝敗の表示の先頭にT2,b2000 のように対局条件を文字列化して突っ込む用。
 #  book_moves : 定跡の手数
-def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_moves,save_candidates,
-		alt_move_prob, alt_move_margin_cp, alt_move_temperature, result_callback=None, stop_predicate=None,
+def vs_match(engines_full,options,threads,loop,book_positions,fileLogging,opt2,book_moves,save_candidates,
+		alt_move_prob, alt_move_margin_cp, alt_move_temperature, result_callback=None, start_callback=None, move_callback=None, stop_predicate=None,
 		paired_openings=False):
 
 	win = lose = draw = 0
@@ -304,6 +440,9 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 	# --- 状態変数の初期化 ---
 	# 対局ごとの状態
 	sfens = [""] * threads
+	initial_position_commands = ["position startpos"] * threads
+	initial_record_lines = ["startpos"] * threads
+	initial_side_to_move = [0] * threads
 	eval_values = [""] * threads
 	candidate_values = [[] for _ in range(threads)]
 	selected_move_meta = [[] for _ in range(threads)]
@@ -408,7 +547,7 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 	def go_cmd(i):
 		p = procs[i]
 		# USI "position"
-		s = "position startpos"
+		s = initial_position_commands[i//2]
 		if sfens[i//2] != "":
 			s += " moves " + sfens[i//2]
 		send_cmd(i,s)
@@ -428,7 +567,11 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 	def usinewgame_cmd(i,sfen_no,pair_index):
 		p = procs[i]
 		send_cmd(i,"usinewgame")
-		sfens[i//2] = book_sfens[sfen_no]
+		book_position = book_positions[sfen_no]
+		sfens[i//2] = ""
+		initial_position_commands[i//2] = book_position["position_command"]
+		initial_record_lines[i//2] = book_position["record_line"]
+		initial_side_to_move[i//2] = book_position["side_to_move"]
 		current_book_indices[i//2] = sfen_no
 		current_pair_indices[i//2] = pair_index
 		moves[i//2] = 0
@@ -436,8 +579,16 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 		selected_move_meta[i//2] = []
 		gameover_reasons[i//2] = ""
 		# 開始局面集を使っている時だけ、その開始手数ぶんのダミー評価値を置く。
-		initial_moves = len(book_sfens[sfen_no].split())
+		initial_moves = book_position["initial_move_count"]
 		eval_values[i//2] = ("0 " * initial_moves) if initial_moves else ""
+		if start_callback and (i % 2) == 0:
+			start_callback({
+				"thread_index": i // 2,
+				"book_index": sfen_no,
+				"pair_index": pair_index,
+				"initial_position": initial_record_lines[i//2],
+				"side_to_move": initial_side_to_move[i//2],
+			})
 
 	# ゲームオーバーのハンドラ
 	# i : engine index
@@ -528,13 +679,13 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 						else:
 							assigned_sfen_no = sfen_no
 							assigned_pair_index = next_pair_index
-							sfen_no = (sfen_no + 1) % len(book_sfens)
+							sfen_no = (sfen_no + 1) % len(book_positions)
 							next_pair_index += 1
 						usinewgame_cmd(engine_idx, assigned_sfen_no, assigned_pair_index)
 						usinewgame_cmd(engine_idx^1, assigned_sfen_no, assigned_pair_index)
 
 						# 先手→後手、交互に行う。
-						go_cmd((engine_idx & ~1) + turns[engine_idx//2])
+						go_cmd((engine_idx & ~1) + (turns[engine_idx//2] ^ initial_side_to_move[engine_idx//2]))
 
 				elif ("bestmove" in line) and (states[engine_idx] == EngineState.WAIT_FOR_BESTMOVE):
 					# node数計測用(60手目までのみ)
@@ -633,6 +784,15 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 									"source": selected_move["source"] if selected_move else "bestmove",
 									"selected_multipv": selected_move["selected_multipv"] if selected_move else 1,
 								})
+							if move_callback:
+								move_callback({
+									"thread_index": engine_idx // 2,
+									"book_index": current_book_indices[engine_idx//2],
+									"pair_index": current_pair_indices[engine_idx//2],
+									"ply": moves[engine_idx//2] + 1,
+									"side_to_move": (moves[engine_idx//2] + initial_side_to_move[engine_idx//2]) & 1,
+									"move": move_to_play,
+								})
 						except:
 							outlog(engine_idx, "Error! " + line)
 
@@ -649,12 +809,16 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 					gameover_cmd(engine_idx, gameover)
 					gameover_cmd(engine_idx^1, gameover)
 					if KifOutput:
-						kif_file.write("startpos moves " + sfens[engine_idx//2] + "\n")
+						record_line = initial_record_lines[engine_idx//2]
+						if sfens[engine_idx//2]:
+							record_line += " moves " + sfens[engine_idx//2]
+						kif_file.write(record_line + "\n")
 						kif_file.write(eval_values[engine_idx//2] + "\n")
 					black_engine = 1 if turns[engine_idx//2] == 0 else 2
 					white_engine = 2 if black_engine == 1 else 1
 					if candidate_file:
 						record = {
+							"initial_position": initial_record_lines[engine_idx//2],
 							"moves": sfens[engine_idx//2].split(),
 							"eval_values": eval_values[engine_idx//2].split(),
 							"candidates": candidate_values[engine_idx//2],
@@ -792,11 +956,11 @@ def main():
 	
 	# --- Basic settings ---
 	parser.add_argument('--config', type=str, help="Path to a YAML configuration file.")
-	parser.add_argument('--home', type=str, help="Path to the home directory containing 'exe' and 'eval' folders.")
+	parser.add_argument('--home', type=str, help="Base directory used to resolve relative engine/book paths.")
 	parser.add_argument('--engine1', type=str, help="Path or name of engine 1.")
-	parser.add_argument('--eval1', type=str, help="Name of the evaluation function folder for engine 1.")
+	parser.add_argument('--eval1', type=str, default="", help="Optional evaluation directory for engine 1. If omitted, engine_dir/eval is used when present.")
 	parser.add_argument('--engine2', type=str, help="Path or name of engine 2.")
-	parser.add_argument('--eval2', type=str, help="Name of the evaluation function folder for engine 2.")
+	parser.add_argument('--eval2', type=str, default="", help="Optional evaluation directory for engine 2. If omitted, engine_dir/eval is used when present.")
 
 	# --- Game settings ---
 	parser.add_argument('--parallel_games', type=int, default=1, help="Number of games to run in parallel.")
@@ -850,7 +1014,7 @@ def main():
 			print(f"Warning: Error reading config file: {e}")
 
 	# 3. 必須引数のチェック
-	required_args = ['home', 'engine1', 'eval1', 'engine2', 'eval2']
+	required_args = ['home', 'engine1', 'engine2']
 	for arg in required_args:
 		if not config.get(arg):
 			print(f"Error: Missing required argument: --{arg}. Please specify it via command line or config file.")
@@ -881,15 +1045,9 @@ def main():
 	fileLogging = config['log']
 	save_candidates = config['save_candidates']
 
-# expand eval_dir
-	evaldirs = []
-	if not os.path.exists(os.path.join(home, eval2_path, "0")) :
-		evaldirs.append(eval2_path)
-	else:
-		i = 0
-		while os.path.exists(os.path.join(home, eval2_path, str(i))):
-			evaldirs.append(os.path.join(eval2_path, str(i)))
-			i += 1
+	engine1_full, eval1_full = resolve_engine_binary_and_eval(home, engine1_path, eval1_path)
+	engine2_full, eval2_full = resolve_engine_binary_and_eval(home, engine2_path, eval2_path)
+	evaldirs = expand_eval_dirs(eval2_full)
 
 	print("home           : " , home)
 	print("play_time_list : " , play_time_list)
@@ -909,48 +1067,23 @@ def main():
 	total_win = total_lose = total_draw = 0
 	total_win_black = total_win_white = 0
 
-	book_sfens = []
-	if book_file_path:
-		resolved_book_file = book_file_path
-		if not os.path.isabs(resolved_book_file):
-			resolved_book_file = os.path.join(home, "book", resolved_book_file)
-
-		with open(resolved_book_file, "r") as book_file:
-			count = 1
-			for sfen in book_file:
-				s = sfen.split()
-				sf = ""
-				for i in range(book_moves):
-					try:
-						# skip "startpos moves"
-						sf += s[i+2] + " "
-					except Exception:
-						print("Error! " + " in " + os.path.basename(resolved_book_file) + " line = " + str(count))
-						break
-				book_sfens.append(sf.strip())
-				count += 1
-				if count % 100 == 0:
-					sys.stdout.write(".")
-					sys.stdout.flush()
-		print()
-	else:
-		book_sfens = [""]
+	book_positions = load_book_positions(home, book_file_path, book_moves)
 
 	# 定跡をシャッフルする
-	if rand_book and len(book_sfens) > 1:
-		random.shuffle(book_sfens)
+	if rand_book and len(book_positions) > 1:
+		random.shuffle(book_positions)
 
 	# threadsはparallel_gamesに相当。 engine_threadsはエンジンに渡すスレッド数。
 	# 古いthreads = threads // engine_threads の行は不要。
 	for evaldir in evaldirs:
 
-		engine1 = engine_to_full(engine1_path)
-		engine2 = engine_to_full(engine2_path)
+		engine1 = engine1_full
+		engine2 = engine2_full
 
 		engines = ( engine1 , engine2 )
-		engines_full = ( os.path.join(home, "exe", engines[0]) , os.path.join(home, "exe", engines[1]) )
-		evals   = ( eval1_path , evaldir )
-		evals_full   = ( os.path.join(home, "eval", eval1_path) , os.path.join(home, "eval", evaldir) )
+		engines_full = engines
+		evals   = ( eval1_full if eval1_full else "(engine default)" , evaldir if evaldir else "(engine default)" )
+		evals_full   = ( eval1_full , evaldir )
 
 		for i in range(2):
 			print("engine" + str(i+1) + " = " + engines[i] + " , eval = " + evals[i])
@@ -974,7 +1107,7 @@ def main():
 				options,
 				threads,
 				loop,
-				book_sfens,
+				book_positions,
 				fileLogging,
 				opt2,
 				book_moves,

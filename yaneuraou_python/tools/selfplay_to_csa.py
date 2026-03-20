@@ -31,18 +31,25 @@ def parse_sfen_records(path: Path):
         move_line = lines[i].strip()
         eval_line = lines[i + 1].strip()
 
-        if not move_line.startswith("startpos"):
-            raise ValueError(f"Unsupported move line: {move_line}")
-
         parts = move_line.split()
+        initial_position = "startpos"
         if parts[:2] == ["startpos", "moves"]:
             moves = parts[2:]
         elif parts == ["startpos"]:
             moves = []
+        elif len(parts) >= 5 and parts[0] == "sfen":
+            initial_position = " ".join(parts[:5])
+            if len(parts) == 5:
+                moves = []
+            elif len(parts) >= 7 and parts[5] == "moves":
+                moves = parts[6:]
+            else:
+                raise ValueError(f"Unsupported move line: {move_line}")
         else:
             raise ValueError(f"Unsupported move line: {move_line}")
 
         records.append({
+            "initial_position": initial_position,
             "moves": moves,
             "eval_values": eval_line.split() if eval_line else [],
         })
@@ -112,6 +119,11 @@ def result_to_endgame(result: str, draw_endgame: str):
 def convert_game(index: int, base_record: dict, json_record: dict, output_dir: Path, draw_endgame: str, engine1_name: str, engine2_name: str):
     cshogi, CSA = load_cshogi()
     board = cshogi.Board()
+    initial_position = json_record.get("initial_position", base_record.get("initial_position", "startpos"))
+    if initial_position != "startpos":
+        if not initial_position.startswith("sfen "):
+            raise ValueError(f"Game {index + 1}: unsupported initial position: {initial_position}")
+        board.set_sfen(initial_position[5:])
 
     moves = base_record["moves"]
     eval_values = json_record.get("eval_values", base_record.get("eval_values", []))
