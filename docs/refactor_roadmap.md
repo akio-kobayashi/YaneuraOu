@@ -257,11 +257,15 @@ Current status:
   in the hottest practical layout unless a replacement layout proves bench-neutral.
 
 ### Phase D: Restructure search/eval state
-- Define a search thread context object.
-- Consolidate accumulator/cache ownership.
-- Clarify NUMA-local versus thread-local data.
-- Add performance gates to every hot-path slice. A Phase D refactor is only
-  acceptable if tournament `bench` and smoke selfplay remain stable.
+- Treat Phase D as a performance experiment phase, not a generalized ownership
+  cleanup phase.
+- Keep search hot-path data in the cheapest proven layout unless a replacement
+  wins on tournament `bench`.
+- Use optimized-symbol profiling to choose targets before changing code.
+- Require every retained slice to pass:
+  - 3-run median tournament `bench`
+  - `usi` / `isready` / short `go` / `quit`
+  - short smoke selfplay
 
 Current status:
 - The first Phase D slice is now in progress: thread-local root search state is grouped under `Search::ThreadRootState`, and worker construction now receives a `Search::RootSearchContext` instead of three loose root references.
@@ -295,6 +299,29 @@ Current status:
 - The tournament search path now reads and writes `optimism` directly through `SearchRuntimeState`, so that grouped hot-state block is no longer just passive storage.
 - `bestMoveChanges` is now also read and written directly through `SearchRuntimeState`, reducing another compatibility alias on the tournament search path.
 - `rootDelta` is now also read and written directly through `SearchRuntimeState`, so aspiration-window bookkeeping is using the grouped runtime block as its real storage.
+- Phase D measurements have now changed the branch plan:
+  broad thread/locality reorganization by itself has not produced reliable wins,
+  while some ownership-oriented changes were neutral or harmful.
+- The branch now treats `profile_tournament` as the default Phase D entry point:
+  keep `-Ofast` / LTO / tournament codegen, but retain symbols and frame pointers
+  so sampling can guide the next slice.
+- The first retained Phase D wins are small and targeted:
+  - relaxed hot-loop stop-flag loads in tournament search
+  - `MovePicker::next_move()` direct loops in place of the generic `select()` helper
+- The practical hotspot set is now explicit:
+  - `YaneuraOuWorker::search<>`
+  - `YaneuraOuWorker::iterative_deepening()`
+  - `MovePicker::next_move()`
+  - `Eval::evaluate()`
+  - NNUE `AffineTransform::Propagate(...)`
+- Low-value work should be excluded from Phase D unless it directly affects those
+  hot paths. In particular, learner/book/helper cleanup is no longer considered
+  Phase D performance work.
+- Phase D should therefore proceed as repeated profile-guided slices:
+  1. profile optimized tournament code,
+  2. change one hotspot,
+  3. keep the change only if median `bench` is non-regressive,
+  4. otherwise revert and move on.
 
 ### Phase E: Replace macro usage in non-hot layers
 - Convert simple feature checks into typed config helpers.
@@ -318,8 +345,8 @@ The following are out of scope for this branch:
 ## Immediate Next Step
 
 The next implementation slice on this branch should be:
-- continue moving evaluator-storage ownership outward from `Position` toward worker or thread context objects,
-- keep fallback storage for non-search utility callers until those call sites are explicitly migrated,
-- then proceed to broader thread-context and NUMA ownership cleanup,
-- keep existing NNUE behavior through the current compatibility layer,
-- and verify each step against [`docs/eval_value_contract.md`](/Users/akio/Documents/GitHub/YaneuraOu/docs/eval_value_contract.md).
+- profile the optimized tournament build before touching code,
+- focus only on confirmed hotspots in search, move picking, evaluation, or NNUE propagation,
+- keep NNUE accumulator locality unchanged unless a replacement layout proves bench-neutral or better,
+- reject ownership-only churn that does not improve measured locality or speed,
+- and verify each retained slice against [`docs/eval_value_contract.md`](/Users/akio/Documents/GitHub/YaneuraOu/docs/eval_value_contract.md).
