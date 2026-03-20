@@ -10,6 +10,7 @@
 #include "../../mate/mate.h"
 #include "../../timeman.h"
 #include "dlshogi_types.h"
+#include "FukauraOuBackend.h"
 #include "SearchOptions.h"
 #include "PvMateSearch.h"
 
@@ -146,6 +147,15 @@ namespace dlshogi {
 		// thread_settings : 各GPU用のスレッド数
         void InitGPU(const std::string& model_path , std::vector<int> thread_settings, int policy_value_batch_maxsize);
 
+		// backend設定を受け取り、モデル存在確認と初期化をまとめて行う。
+		void InitializeBackend(const FukauraOuBackendSettings& settings);
+
+		// "isready"時の初期化シーケンスをまとめて行う。
+		void InitializeForReady(const OptionsMap& options, const FukauraOuBackendSettings& settings);
+
+		// main threadの"go"直前準備を行う。
+		void PrepareRootSearch(const Search::LimitsType& limits);
+
 		// 対局開始時に呼び出されるハンドラ
 		void NewGame();
 
@@ -219,6 +229,17 @@ namespace dlshogi {
 		// ponderの場合は、呼び出し元で待機すること。
 		Move UctSearchGenmove(Position& pos, const std::string& game_root_sfen , const std::vector<Move>& moves, Move& ponderMove);
 
+		// main threadの探索開始シーケンスを実行し、bestmove/ponderを返す。
+		std::pair<std::string, std::string> StartRootSearch(Position& pos, const Search::LimitsType& limits);
+
+		// workerごとの探索開始をdispatchする。main threadのときだけbestmoveを返す。
+		bool StartWorkerSearch(Position& pos,
+		                       const Search::LimitsType& limits,
+		                       size_t thread_id,
+		                       bool is_main_thread,
+		                       std::string& bestmove,
+		                       std::string& ponder);
+
 		// NNに渡すモデルPathの設定。
 		//void SetModelPaths(const std::vector<std::string>& paths);
 
@@ -278,6 +299,13 @@ namespace dlshogi {
         FukauraOuEngine& engine;
 
 	private:
+
+		// "isready" で必要な初期化を段階ごとに実行する。
+		void InitializeEvalAndBooks();
+		void InitializeSearcherCore(const OptionsMap& options);
+		void InitializeRootSearch(Position& pos, const Search::LimitsType& limits);
+		const std::string& ResolveGameRootSfen();
+		void WaitForRootSearchExit(const Search::LimitsType& limits);
 
 		// Root Node(探索開始局面)を展開する。
 		// generate_all : 歩の不成なども生成する。

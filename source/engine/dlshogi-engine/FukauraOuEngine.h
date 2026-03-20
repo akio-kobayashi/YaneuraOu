@@ -11,6 +11,7 @@
 
 #include "dlshogi_types.h"
 #include "dlshogi_searcher.h"
+#include "FukauraOuBackend.h"
 #include "SearchOptions.h"
 
 namespace dlshogi {
@@ -40,10 +41,7 @@ class FukauraOuWorker : public YaneuraOu::Search::Worker {
 	// "go"コマンドで呼び出される。
     virtual void start_searching() override;
 
-	// 並列探索
-	void parallel_search();
-
-	virtual ~FukauraOuWorker();
+	virtual ~FukauraOuWorker() = default;
 
 	// dlshogiの探索部本体
     DlshogiSearcher& searcher;
@@ -72,14 +70,8 @@ class FukauraOuEngine: public YaneuraOu::Engine {
     DlshogiSearcher searcher;
 
    protected:
-    // NNの設定を生やす。add_options()時に呼び出される。
-    void add_nn_options();
-
-	// "isready"タイミングで行うGPUの初期化。
-	void init_gpu();
-
-	// "Max_GPU","Disabled_GPU"と"UCT_Threads"の設定値から、各GPUのスレッド数の設定を返す。
-    std::vector<int> get_thread_settings();
+	// "isready"タイミングで行うbackendの初期化。
+	void init_backend();
 
 };  // class FukauraOuEngine
 

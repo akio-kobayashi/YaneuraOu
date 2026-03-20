@@ -22,46 +22,6 @@ namespace dlshogi {
 FukauraOuEngine::FukauraOuEngine() :
     searcher(*this){}
 
-// NN関係のoptionを生やす。
-void FukauraOuEngine::add_nn_options()
-{
-    OptionsMap& options = get_options();
-
-    // 各GPU用のDNNモデル名と、そのGPU用のUCT探索のスレッド数と、そのGPUに一度に何個の局面をまとめて評価(推論)を行わせるのか。
-
-    options.add("EvalDir", Option("eval", [](const Option& o) {
-                    std::string eval_dir = std::string(o);
-                    return std::nullopt;
-                }));
-
-	// 使用するGPUの最大
-	options.add("Max_GPU", Option(1, 1, 1024));
-
-	// 無効化するGPU(カンマ区切りで)
-	options.add("Disabled_GPU", Option(""));
-
-    // RTX 3090で10bなら4、15bなら2で最適。
-    options.add("UCT_Threads", Option(2, 0, 256));
-
-#if defined(COREML)
-    // Core MLでは、ONNXではなく独自形式のモデルが必要。
-    options.add("DNN_Model", Option(R"(model.mlmodel)"));
-#else
-    options.add("DNN_Model", Option(R"(model.onnx)"));
-#endif
-
-#if defined(TENSOR_RT) || defined(ORT_TRT)
-    // 通常時の推奨128 , 検討の時は推奨256。
-    options.add("DNN_Batch_Size", Option(128, 1, 1024));
-#elif defined(ONNXRUNTIME)
-    // CPUを使っていることがあるので、default値、ちょっと少なめにしておく。
-    options.add("DNN_Batch_Size", Option(32, 1, 1024));
-#elif defined(COREML)
-    // M1チップで8程度でスループットが飽和する。
-    options.add("DNN_Batch_Size", Option(8, 1, 1024));
-#endif
-}
-
 // ふかうら王のエンジンオプションを生やす
 void FukauraOuEngine::add_options() {
 
@@ -71,112 +31,24 @@ void FukauraOuEngine::add_options() {
 	// 探索部で用いるoptionを生やす。
     searcher.add_options(options);
 
-	// NN関係のoptionを生やす。
-    add_nn_options();
+	// backend関係のoptionを生やす。
+    add_backend_options(options);
 
     // 定跡関係のoptionを生やす
     searcher.book.add_options(options);
 }
 
-// "Max_GPU","Disabled_GPU"と"UCT_Threads"の設定値から、各GPUのスレッド数の設定を返す。
-std::vector<int> FukauraOuEngine::get_thread_settings() {
-
-    int option_max_gpu = int(options["Max_GPU"]);
-
-    // GPUのデバイス数を取得する
-    int device_count = Eval::dlshogi::NN::get_device_count();
-
-	// 取得できなかった時は-1が返るので、その時はオプション設定に従う。
-    if (device_count == -1)
-        device_count = option_max_gpu;
-
-    // GPUの最大数
-    int max_gpu = std::min(option_max_gpu, device_count);
-
-    // 各GPUのスレッド数
-    int thread_num = int(options["UCT_Threads"]);
-
-    // スレッド設定
-    std::vector<int> thread_settings;
-
-    // GPUの数だけスレッド数を設定
-    thread_settings.assign(max_gpu, thread_num);
-
-    for (auto&& disabled : split(std::string(options["Disabled_GPU"]), ","))
-    {
-        int d = StringExtension::to_int(std::string(disabled), 0);
-        if (d == 0)
-            // 🤔 これ、parse失敗した警告を出しておいたほうがいいか？
-            continue;
-
-        // 番号は1 originである。
-        if (1 <= d && d <= max_gpu)
-            // 無効化するGPU番号に対応するスレッド数を0に設定する。
-            thread_settings[d - 1] = 0;
-    }
-
-    return thread_settings;
-}
-
-void FukauraOuEngine::init_gpu()
+void FukauraOuEngine::init_backend()
 {
-	// 📝 GPUの数に応じてthreadの確保を行うのでthreadの確保はこのタイミングで行われる。
-
-	auto& options = get_options();
-
-	// 各GPUのスレッド設定。無効化されているdeviceは0。
-    auto thread_settings = get_thread_settings();
-
-	// DNNのbatch sizeの設定。
-    int dnn_batch_size = int(options["DNN_Batch_Size"]);
-
-	// 評価関数モデルのPATH。
-	auto eval_dir = options["EvalDir"];
-    auto model_name = options["DNN_Model"];
-    auto model_path = Path::Combine(eval_dir, model_name);
-
-	// modelファイルが存在することは事前に確認しておく。
-	if (!Path::Exists(model_path))
-	{
-		sync_cout << "Error! : " << model_path << " file not found" << sync_endl;
-        Tools::exit();
-	}
-
-	searcher.InitGPU(model_path, thread_settings, dnn_batch_size);
+	// 📝 backendの構成に応じてthreadの確保を行うのでthreadの確保はこのタイミングで行われる。
+    const auto settings = resolve_backend_settings(options);
+	searcher.InitializeForReady(options, settings);
 }
 
 
 // "isready"コマンド応答。
 void FukauraOuEngine::isready() {
-
-    // -----------------------
-    // 評価関数テーブルの初期化(起動時でも良い)
-    // -----------------------
-    Eval::dlshogi::init();
-
-    // -----------------------
-    //   定跡の読み込み
-    // -----------------------
-
-    searcher.book.read_book();
-
-    // -----------------------
-    //   GPUの初期化
-    // -----------------------
-
-	init_gpu();
-
-    // -----------------------
-    //   探索部の初期化
-    // -----------------------
-
-	// 探索部の初期化
-	searcher.InitializeUctSearch();
-
-	// PV lineの詰み探索の設定
-	searcher.SetPvMateSearch(int(options["PV_Mate_Search_Threads"]), int(options["PV_Mate_Search_Nodes"]));
-
-	// 🤔 "isready"に対してnode limit = 1 , batch_size = 128 で探索したほうがいいかも。(dlshogiはそうなっている)
+	init_backend();
 
 	// 基底classのisready()の呼び出し。
 	Engine::isready();
@@ -217,76 +89,17 @@ void FukauraOuWorker::pre_start_searching() {
     rootPos.set_ekr(searcher.search_options.enteringKingRule);
 
 	if (is_mainthread())
-        // 🌈 Stockfishでthread.cppにあった初期化の一部はSearchManager::pre_start_searching()に移動させた。
-        searcher.search_limits.ponder = limits.ponderMode;
+        searcher.PrepareRootSearch(limits);
 }
 
 
 // "go"コマンドに対して呼び出される。
 void FukauraOuWorker::start_searching()
 {
-    if (!is_mainthread())
-    {
-        parallel_search();
-        return;
-    }
-
-    // 開始局面の手番をglobalに格納しておいたほうが便利。
-    searcher.search_limits.root_color = rootPos.side_to_move();
-
-    // "NodesLimit"の値など、今回の"go"コマンドによって決定した値が反映される。
-    searcher.SetLimits(rootPos, limits);
-
-    // "position"コマンドが送られずに"go"がきた。
-    if (engine.game_root_sfen.empty())
-        engine.game_root_sfen = StartSFEN;
-
-    Move ponderMove;
-    Move move = searcher.UctSearchGenmove(rootPos, engine.game_root_sfen,
-                                          engine.moves_from_game_root, ponderMove);
-
-    // ponder中であれば、呼び出し元で待機しなければならない。
-
-    // 最大depth深さに到達したときに、ここまで実行が到達するが、
-    // まだThreads.stopが生じていない。しかし、ponder中や、go infiniteによる探索の場合、
-    // USI(UCI)プロトコルでは、"stop"や"ponderhit"コマンドをGUIから送られてくるまでbest moveを出力してはならない。
-    // それゆえ、単にここでGUIからそれらのいずれかのコマンドが送られてくるまで待つ。
-    // "stop"が送られてきたらThreads.stop == trueになる。
-    // "ponderhit"が送られてきたらThreads.ponder == falseになるので、それを待つ。(stopOnPonderhitは用いない)
-    // "go infinite"に対してはstopが送られてくるまで待つ。
-    // ちなみにStockfishのほう、ここのコードに長らく同期上のバグがあった。
-    // やねうら王のほうは、かなり早くからこの構造で書いていた。最近のStockfishではこの書き方に追随した。
-    while (!threads.stop && (searcher.search_limits.ponder || limits.infinite))
-    {
-        //	こちらの思考は終わっているわけだから、ある程度細かく待っても問題ない。
-        // (思考のためには計算資源を使っていないので。)
-        Tools::sleep(1);
-
-        // Stockfishのコード、ここ、busy waitになっているが、さすがにそれは良くないと思う。
-    }
-
-
-    std::string bestmove = to_usi_string(move);
+    std::string bestmove;
     std::string ponder;
-    if (ponderMove)
-        ponder = to_usi_string(ponderMove);
-
-    engine.updateContext.onBestmove(bestmove, ponder);
-}
-
-void FukauraOuWorker::parallel_search()
-{
-	// searcherが、このスレッドがどのインスタンスの
-	// UCTSearcher::ParallelUctSearch()を呼び出すかを知っている。
-
-	// このrootPosはスレッドごとに用意されているからコピー可能。
-	
-	searcher.parallel_search(rootPos, threadIdx);
-}
-
-FukauraOuWorker::~FukauraOuWorker()
-{
-	searcher.FinalizeUctSearch();
+    if (searcher.StartWorkerSearch(rootPos, limits, threadIdx, is_mainthread(), bestmove, ponder))
+        engine.updateContext.onBestmove(bestmove, ponder);
 }
 
 #if 0

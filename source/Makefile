@@ -478,6 +478,7 @@ ifneq (,$(findstring YANEURAOU_ENGINE_DEEP,$(YANEURAOU_EDITION)))
 		engine/dlshogi-engine/UctSearch.cpp                             \
 		engine/dlshogi-engine/Node.cpp                                  \
 		engine/dlshogi-engine/PvMateSearch.cpp                          \
+		engine/dlshogi-engine/FukauraOuBackend.cpp                      \
 		engine/dlshogi-engine/FukauraOuEngine.cpp                       \
 		engine/dlshogi-engine/SearchOptions.cpp
 

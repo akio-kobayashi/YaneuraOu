@@ -15,6 +15,7 @@
 #include "../../thread.h"
 #include "../../mate/mate.h"
 #include "../../engine.h"
+#include "../../eval/deep/nn_types.h"
 
 namespace dlshogi {
 
@@ -32,6 +33,67 @@ DlshogiSearcher::DlshogiSearcher(FukauraOuEngine& engine) :
 void DlshogiSearcher::add_options(OptionsMap& options) {
 	search_options.add_options(options);
     search_limits.time_manager.add_options(options);
+}
+
+void DlshogiSearcher::InitializeBackend(const FukauraOuBackendSettings& settings)
+{
+    if (!Path::Exists(settings.model_path))
+    {
+        sync_cout << "Error! : " << settings.model_path << " file not found" << sync_endl;
+        Tools::exit();
+    }
+
+    InitGPU(settings.model_path, settings.thread_settings, settings.batch_size);
+}
+
+void DlshogiSearcher::InitializeEvalAndBooks()
+{
+    Eval::dlshogi::init();
+
+    book.read_book();
+
+#if defined(USE_POLICY_BOOK)
+    policy_book.read_book();
+#endif
+}
+
+void DlshogiSearcher::InitializeSearcherCore(const OptionsMap& options)
+{
+    InitializeUctSearch();
+    SetPvMateSearch(int(options.at("PV_Mate_Search_Threads")), int(options.at("PV_Mate_Search_Nodes")));
+}
+
+void DlshogiSearcher::InitializeRootSearch(Position& pos, const Search::LimitsType& limits)
+{
+    search_limits.root_color = pos.side_to_move();
+    SetLimits(pos, limits);
+}
+
+const std::string& DlshogiSearcher::ResolveGameRootSfen()
+{
+    if (engine.game_root_sfen.empty())
+        engine.game_root_sfen = StartSFEN;
+    return engine.game_root_sfen;
+}
+
+void DlshogiSearcher::WaitForRootSearchExit(const Search::LimitsType& limits)
+{
+    while (!engine.threads.stop && (search_limits.ponder || limits.infinite))
+    {
+        Tools::sleep(1);
+    }
+}
+
+void DlshogiSearcher::InitializeForReady(const OptionsMap& options, const FukauraOuBackendSettings& settings)
+{
+    InitializeEvalAndBooks();
+    InitializeBackend(settings);
+    InitializeSearcherCore(options);
+}
+
+void DlshogiSearcher::PrepareRootSearch(const Search::LimitsType& limits)
+{
+    search_limits.ponder = limits.ponderMode;
 }
 
 
@@ -133,10 +195,6 @@ void DlshogiSearcher::InitGPU(const std::string& model_path , std::vector<int> t
 	// leaf nodeでの詰み探索用のMateSolverの初期化
 	for (auto& uct_searcher : thread_id_to_uct_searcher)
 		uct_searcher->InitMateSearcher(search_options);
-
-#if defined(USE_POLICY_BOOK)
-	policy_book.read_book();
-#endif
 
 }
 
@@ -447,8 +505,8 @@ Move DlshogiSearcher::UctSearchGenmove(Position&                pos,
 
 	// main以外のthreadを開始する
 	engine.threads.start_searching();
-	// 💡 FukauraOuWorker::start_searching()が呼び出され、FukauraOuWorker::parallel_search()から、
-	//     このclassのparallel_search()がよびだされる 。
+	// 💡 worker thread側はDlshogiSearcher::StartWorkerSearch()経由で
+	//     このclassのparallel_search()に到達する。
 
 	// main thread(このスレッド)も探索に参加する。
 	// 💡 main threadは thread id == 0と決まっている。
@@ -548,6 +606,41 @@ SEARCH_SKIP:
     ponderMove = best.ponder;
 
     return best.move;
+}
+
+std::pair<std::string, std::string> DlshogiSearcher::StartRootSearch(Position& pos,
+                                                                     const Search::LimitsType& limits)
+{
+    InitializeRootSearch(pos, limits);
+
+    Move ponderMove;
+    const Move move =
+      UctSearchGenmove(pos, ResolveGameRootSfen(), engine.moves_from_game_root, ponderMove);
+
+    WaitForRootSearchExit(limits);
+
+    const std::string bestmove = to_usi_string(move);
+    const std::string ponder = ponderMove ? to_usi_string(ponderMove) : std::string();
+    return { bestmove, ponder };
+}
+
+bool DlshogiSearcher::StartWorkerSearch(Position&                 pos,
+                                        const Search::LimitsType& limits,
+                                        size_t                    thread_id,
+                                        bool                      is_main_thread,
+                                        std::string&              bestmove,
+                                        std::string&              ponder)
+{
+    if (!is_main_thread)
+    {
+        parallel_search(pos, thread_id);
+        return false;
+    }
+
+    const auto result = StartRootSearch(pos, limits);
+    bestmove = result.first;
+    ponder = result.second;
+    return true;
 }
 
 // Root Node(探索開始局面)を展開する。
