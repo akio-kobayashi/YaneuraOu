@@ -1,5 +1,6 @@
 import argparse
 import datetime
+import json
 import math
 import os.path
 import random
@@ -11,8 +12,7 @@ import queue
 try:
     import yaml
 except ImportError:
-    print("PyYAML is not installed. Please install it with 'pip install pyyaml'")
-    sys.exit(1)
+    yaml = None
 
 from enum import Enum, auto
 
@@ -67,8 +67,239 @@ def output_rating(win,draw,lose,win_black,win_white,opt2):
 	sys.stdout.flush()
 
 
+def parse_usi_score_info(line):
+	parts = line.strip().split()
+	result = {
+		"multipv": 1,
+		"score_type": None,
+		"score": None,
+		"normalized_score": "",
+		"pv": [],
+	}
+
+	for i in range(len(parts)):
+		if parts[i] == "multipv" and i + 1 < len(parts):
+			try:
+				result["multipv"] = int(parts[i + 1])
+			except ValueError:
+				pass
+		elif parts[i] == "score" and i + 2 < len(parts):
+			score_type = parts[i + 1]
+			try:
+				score = int(parts[i + 2])
+			except ValueError:
+				return None
+			result["score_type"] = score_type
+			result["score"] = score
+			if score_type == "cp":
+				result["normalized_score"] = str(score)
+			elif score_type == "mate":
+				if score >= 0:
+					result["normalized_score"] = str(32000 - score)
+				else:
+					result["normalized_score"] = str(-32000 + score)
+			else:
+				result["normalized_score"] = "?"
+		elif parts[i] == "pv" and i + 1 < len(parts):
+			result["pv"] = parts[i + 1:]
+			break
+
+	if result["score_type"] is None:
+		return None
+	return result
+
+
+def choose_move_from_candidates(bestmove_line, candidate_info_map, alt_move_prob, alt_move_margin_cp, alt_move_temperature):
+	parts = bestmove_line.split()
+	if len(parts) < 2:
+		return None
+
+	bestmove = parts[1]
+	if alt_move_prob <= 0.0 or alt_move_margin_cp < 0:
+		return {
+			"move": bestmove,
+			"source": "bestmove",
+			"selected_multipv": 1,
+		}
+
+	top_candidate = candidate_info_map.get(1)
+	if not top_candidate or top_candidate["score_type"] != "cp" or not top_candidate["pv"]:
+		return {
+			"move": bestmove,
+			"source": "bestmove",
+			"selected_multipv": 1,
+		}
+
+	top_score = top_candidate["score"]
+	eligible_alternatives = []
+	for key in sorted(candidate_info_map.keys()):
+		if key <= 1:
+			continue
+		candidate = candidate_info_map[key]
+		if candidate["score_type"] != "cp" or not candidate["pv"]:
+			continue
+		score_gap = top_score - candidate["score"]
+		if score_gap <= alt_move_margin_cp:
+			eligible_alternatives.append(candidate)
+
+	if not eligible_alternatives or random.random() >= alt_move_prob:
+		return {
+			"move": bestmove,
+			"source": "bestmove",
+			"selected_multipv": 1,
+		}
+
+	weights = []
+	for candidate in eligible_alternatives:
+		score_gap = top_score - candidate["score"]
+		weights.append(math.exp(-score_gap / max(1.0, alt_move_temperature)))
+
+	chosen = random.choices(eligible_alternatives, weights=weights, k=1)[0]
+	return {
+		"move": chosen["pv"][0],
+		"source": "candidate",
+		"selected_multipv": chosen["multipv"],
+	}
+
+
+def parse_book_line(line, book_moves):
+	parts = line.strip().split()
+	if not parts:
+		return None
+
+	if parts[0] == "startpos":
+		move_tokens = []
+		if len(parts) >= 2 and parts[1] == "moves":
+			move_tokens = parts[2:]
+		if book_moves > 0:
+			move_tokens = move_tokens[:book_moves]
+		record_line = "startpos"
+		if move_tokens:
+			record_line += " moves " + " ".join(move_tokens)
+		return {
+			"position_command": "position " + record_line,
+			"record_line": record_line,
+			"initial_move_count": len(move_tokens),
+			"side_to_move": len(move_tokens) & 1,
+		}
+
+	if parts[0] == "sfen":
+		if len(parts) < 5 or parts[2] not in ("b", "w"):
+			return None
+		record_line = " ".join(parts[:5])
+		if len(parts) > 5:
+			if parts[5] != "moves":
+				return None
+			record_line += " moves " + " ".join(parts[6:])
+		return {
+			"position_command": "position " + record_line,
+			"record_line": record_line,
+			"initial_move_count": 0,
+			"side_to_move": 0 if parts[2] == "b" else 1,
+		}
+
+	return None
+
+
+def load_book_positions(home, book_file_path, book_moves):
+	if not book_file_path:
+		return [{
+			"position_command": "position startpos",
+			"record_line": "startpos",
+			"initial_move_count": 0,
+			"side_to_move": 0,
+		}]
+
+	resolved_book_file = book_file_path
+	if not os.path.isabs(resolved_book_file):
+		resolved_book_file = os.path.join(home, "book", resolved_book_file)
+
+	book_positions = []
+	with open(resolved_book_file, "r") as book_file:
+		count = 1
+		for line in book_file:
+			book_position = parse_book_line(line, book_moves)
+			if book_position is None:
+				print("Error! " + " in " + os.path.basename(resolved_book_file) + " line = " + str(count))
+			else:
+				book_positions.append(book_position)
+			count += 1
+			if count % 100 == 0:
+				sys.stdout.write(".")
+				sys.stdout.flush()
+
+	if not book_positions:
+		raise ValueError(f"No valid opening positions found in {resolved_book_file}")
+
+	print()
+	return book_positions
+
+
+def resolve_engine_path(home, engine_path):
+	resolved_engine = engine_to_full(engine_path)
+	if os.path.isabs(resolved_engine):
+		return resolved_engine
+	return os.path.join(home, resolved_engine)
+
+
+def resolve_engine_binary_and_eval(home, engine_path, eval_path):
+	resolved_engine = resolve_engine_path(home, engine_path)
+	engine_dir = resolved_engine if os.path.isdir(resolved_engine) else os.path.dirname(resolved_engine)
+
+	if os.path.isdir(resolved_engine):
+		candidates = [
+			os.path.join(resolved_engine, "YaneuraOu-native"),
+			os.path.join(resolved_engine, "YaneuraOu-by-gcc"),
+			os.path.join(resolved_engine, "YaneuraOu-apple_m2"),
+		]
+		binary_path = ""
+		for candidate in candidates:
+			if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+				binary_path = candidate
+				break
+		if not binary_path:
+			for entry in os.listdir(resolved_engine):
+				candidate = os.path.join(resolved_engine, entry)
+				if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+					binary_path = candidate
+					break
+		if not binary_path:
+			raise FileNotFoundError(f"No executable engine binary found under {resolved_engine}")
+	else:
+		binary_path = resolved_engine
+
+	if eval_path:
+		if os.path.isabs(eval_path):
+			eval_dir = eval_path
+		else:
+			engine_local_eval = os.path.join(engine_dir, eval_path)
+			legacy_eval = os.path.join(home, "eval", eval_path)
+			eval_dir = engine_local_eval if os.path.exists(engine_local_eval) else legacy_eval
+	else:
+		default_engine_eval = os.path.join(engine_dir, "eval")
+		if os.path.exists(default_engine_eval):
+			eval_dir = default_engine_eval
+		else:
+			eval_dir = ""
+
+	return binary_path, eval_dir
+
+
+def expand_eval_dirs(eval_dir):
+	if not eval_dir:
+		return [""]
+	if not os.path.exists(os.path.join(eval_dir, "0")):
+		return [eval_dir]
+	evaldirs = []
+	i = 0
+	while os.path.exists(os.path.join(eval_dir, str(i))):
+		evaldirs.append(os.path.join(eval_dir, str(i)))
+		i += 1
+	return evaldirs
+
+
 # 思考エンジンに対するオプションを生成する。
-def create_option(engines,engine_threads,evals,times,hashes,PARAMETERS_LOG_FILE_PATH):
+def create_option(engines,engine_threads,evals,times,hashes,multipv,PARAMETERS_LOG_FILE_PATH):
 
 	# 思考エンジンに対するコマンド列を保存する。
 	options = []
@@ -87,6 +318,7 @@ def create_option(engines,engine_threads,evals,times,hashes,PARAMETERS_LOG_FILE_
 		inc_time = 0
 		total_time = 0
 		depth_time = 0
+		nodes_limit = 0
 
 		nodes_time = False
 
@@ -109,6 +341,8 @@ def create_option(engines,engine_threads,evals,times,hashes,PARAMETERS_LOG_FILE_
 				total_time = t
 			elif c == "d":
 				depth_time = t
+			elif c == "n":
+				nodes_limit = t
 
 		option = []
 		if ("Yane" in engines[i]):
@@ -118,23 +352,19 @@ def create_option(engines,engine_threads,evals,times,hashes,PARAMETERS_LOG_FILE_
 				option.append("go btime REST_TIME wtime REST_TIME inc " + str(inc_time))
 			elif depth_time:
 				option.append("go depth " + str(depth_time))
+			elif nodes_limit:
+				option.append("go nodes " + str(nodes_limit))
 			else:
 				option.append("go btime REST_TIME wtime REST_TIME byoyomi " + str(byoyomi))
 
 			option.append("setoption name Threads value " + str(engine_threads))
 			option.append("setoption name EvalDir value " + evals[i])
-			option.append("setoption name Hash value " + str(hashes[i]))
+			option.append("setoption name USI_Hash value " + str(hashes[i]))
 			option.append("setoption name BookFile value no_book")
+			option.append("setoption name MultiPV value " + str(multipv))
 			option.append("setoption name MinimumThinkingTime value 1000")
 			option.append("setoption name NetworkDelay value 0")
 			option.append("setoption name NetworkDelay2 value 0")
-
-#			option.append("setoption name EvalShare value false")
-			option.append("setoption name EvalShare value true")
-#			if i==0:
-#				option.append("setoption name EvalShare value false")
-#			else:
-#				option.append("setoption name EvalShare value true")
 			if nodes_time:
 				option.append("setoption name nodestime value 600")
 			if PARAMETERS_LOG_FILE_PATH :
@@ -165,7 +395,7 @@ def create_option(engines,engine_threads,evals,times,hashes,PARAMETERS_LOG_FILE_
 
 		options.append(option)
 
-		options2.append([total_time,inc_time,byoyomi,rtime,depth_time])
+		options2.append([total_time,inc_time,byoyomi,rtime,depth_time,nodes_limit])
 
 	options.append(options2[0])
 	options.append(options2[1])
@@ -194,7 +424,9 @@ def read_engine_output(engine_idx, proc, message_queue):
 #  book_sfens : 定跡
 #  opt2       : 勝敗の表示の先頭にT2,b2000 のように対局条件を文字列化して突っ込む用。
 #  book_moves : 定跡の手数
-def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_moves,kifu_format="sfen"):
+def vs_match(engines_full,options,threads,loop,book_positions,fileLogging,opt2,book_moves,save_candidates,
+		alt_move_prob, alt_move_margin_cp, alt_move_temperature, result_callback=None, start_callback=None, move_callback=None, stop_predicate=None,
+		paired_openings=False):
 
 	win = lose = draw = 0
 	win_black = win_white = 0
@@ -208,9 +440,18 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 	# --- 状態変数の初期化 ---
 	# 対局ごとの状態
 	sfens = [""] * threads
+	initial_position_commands = ["position startpos"] * threads
+	initial_record_lines = ["startpos"] * threads
+	initial_side_to_move = [0] * threads
 	eval_values = [""] * threads
+	candidate_values = [[] for _ in range(threads)]
+	selected_move_meta = [[] for _ in range(threads)]
+	gameover_reasons = [""] * threads
 	moves = [0] * threads
 	turns = [0] * threads
+	current_book_indices = [0] * threads
+	current_pair_indices = [0] * threads
+	next_pair_index = 0
 
 	# エンジンプロセスごとの状態
 	procs = [None] * (threads * 2)
@@ -223,6 +464,7 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 	nodes_str = [""] * (threads * 2)
 	nodes = [0] * (threads * 2)
 	eval_value_from_thread = [""] * (threads * 2)
+	candidate_info_from_thread = [{} for _ in range(threads * 2)]
 	term_procs = [False] * (threads * 2)
 
 	# --- エンジン起動とリーダー・スレッド開始 ---
@@ -281,23 +523,11 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 	if FileLogging:
 		log_file = open("script_log"+now.strftime("%Y%m%d%H%M%S")+".txt","w")
 
-	kif_file = None
-	csa_exporters = None
-	kif_base = now.strftime("%Y%m%d%H%M%S") + opt2.replace(",","_")
 	if KifOutput:
-		if kifu_format == "csa":
-			try:
-				from cshogi import CSA
-			except ImportError:
-				print("cshogi is not installed. Please install it with 'pip install cshogi'")
-				sys.exit(1)
-
-			csa_exporters = []
-			for game_idx in range(threads):
-				csa_path = f"{kif_base}_g{game_idx:03d}.csa"
-				csa_exporters.append(CSA.Exporter(csa_path, append=False))
-		else:
-			kif_file = open(kif_base + ".sfen","w")
+		kif_file = open(now.strftime("%Y%m%d%H%M%S") + opt2.replace(",","_") + ".sfen","w")
+	candidate_file = None
+	if save_candidates:
+		candidate_file = open(now.strftime("%Y%m%d%H%M%S") + opt2.replace(",","_") + ".jsonl","w")
 
 	def send_cmd(i,s):
 		p = procs[i]
@@ -312,12 +542,12 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 		send_cmd(i,"isready")
 		states[i] = EngineState.WAIT_FOR_READYOK
 		# rest_time = total_time
-		rest_times[i] = options[2 + (i & 1)][0]
+		rest_times[i] = options[2][0]
 
 	def go_cmd(i):
 		p = procs[i]
 		# USI "position"
-		s = "position startpos"
+		s = initial_position_commands[i//2]
 		if sfens[i//2] != "":
 			s += " moves " + sfens[i//2]
 		send_cmd(i,s)
@@ -326,6 +556,7 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 		cmd = options[i & 1][0]
 		cmd = cmd.replace("REST_TIME",str(rest_times[i]))
 		send_cmd(i,cmd)
+		candidate_info_from_thread[i] = {}
 
 		# changes state
 		states[i]   = EngineState.WAIT_FOR_BESTMOVE
@@ -333,13 +564,31 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 
 		go_times[i] = time.time()
 
-	def usinewgame_cmd(i,sfen_no):
+	def usinewgame_cmd(i,sfen_no,pair_index):
 		p = procs[i]
 		send_cmd(i,"usinewgame")
-		sfens[i//2] = book_sfens[sfen_no]
+		book_position = book_positions[sfen_no]
+		sfens[i//2] = ""
+		initial_position_commands[i//2] = book_position["position_command"]
+		initial_record_lines[i//2] = book_position["record_line"]
+		initial_side_to_move[i//2] = book_position["side_to_move"]
+		current_book_indices[i//2] = sfen_no
+		current_pair_indices[i//2] = pair_index
 		moves[i//2] = 0
-		# 定跡の評価値はよくわからんので0にしとくしかない。
-		eval_values[i//2] = "0 "*book_moves
+		candidate_values[i//2] = []
+		selected_move_meta[i//2] = []
+		gameover_reasons[i//2] = ""
+		# 開始局面集を使っている時だけ、その開始手数ぶんのダミー評価値を置く。
+		initial_moves = book_position["initial_move_count"]
+		eval_values[i//2] = ("0 " * initial_moves) if initial_moves else ""
+		if start_callback and (i % 2) == 0:
+			start_callback({
+				"thread_index": i // 2,
+				"book_index": sfen_no,
+				"pair_index": pair_index,
+				"initial_position": initial_record_lines[i//2],
+				"side_to_move": initial_side_to_move[i//2],
+			})
 
 	# ゲームオーバーのハンドラ
 	# i : engine index
@@ -369,35 +618,6 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 	def outstd(i,line):
 		print("["+str(i)+"]>" + line.strip())
 		sys.stdout.flush()
-
-	def write_csa_game(game_idx, game_result):
-		exporter = csa_exporters[game_idx]
-		engine_names = [
-			os.path.basename(engines_full[0]),
-			os.path.basename(engines_full[1]),
-		]
-		exporter.info(names=engine_names, version="V2")
-
-		try:
-			import cshogi
-			board = cshogi.Board()
-			evals = eval_values[game_idx].split()
-			usi_moves = sfens[game_idx].split()
-			for ply, usi_move in enumerate(usi_moves):
-				move = board.push_usi(usi_move)
-				comment = None
-				if ply < len(evals):
-					comment = f"cp {evals[ply]}"
-				exporter.move(move, comment=comment)
-		except Exception as e:
-			outlog(game_idx * 2, f"CSA write error: {e}")
-			exporter.endgame("%CHUDAN")
-			return
-
-		if game_result == GameResult.DRAW:
-			exporter.endgame("%SENNICHITE")
-		else:
-			exporter.endgame("%TORYO")
 
 
 	# set options for each engine
@@ -434,6 +654,10 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 				# 評価値計測用
 				if "score" in line :
 					eval_value_from_thread[engine_idx] = line
+					if save_candidates and " pv " in line:
+						parsed = parse_usi_score_info(line)
+						if parsed:
+							candidate_info_from_thread[engine_idx][parsed["multipv"]] = parsed
 
 				gameover = GameResult.NO_RESULT # ゲームオーバーフラグ
 
@@ -448,12 +672,20 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 					# 両方のエンジンがstart状態になったら対局開始
 					if states[engine_idx^1] == EngineState.START:
 						# isreadyで待っていた両方のエンジンに対してusinewgameを送る
-						usinewgame_cmd(engine_idx, sfen_no)
-						usinewgame_cmd(engine_idx^1, sfen_no)
-						sfen_no = (sfen_no + 1) % len(book_sfens)
+						thread_idx = engine_idx // 2
+						if paired_openings and turns[thread_idx] == 1:
+							assigned_sfen_no = current_book_indices[thread_idx]
+							assigned_pair_index = current_pair_indices[thread_idx]
+						else:
+							assigned_sfen_no = sfen_no
+							assigned_pair_index = next_pair_index
+							sfen_no = (sfen_no + 1) % len(book_positions)
+							next_pair_index += 1
+						usinewgame_cmd(engine_idx, assigned_sfen_no, assigned_pair_index)
+						usinewgame_cmd(engine_idx^1, assigned_sfen_no, assigned_pair_index)
 
 						# 先手→後手、交互に行う。
-						go_cmd((engine_idx & ~1) + turns[engine_idx//2])
+						go_cmd((engine_idx & ~1) + (turns[engine_idx//2] ^ initial_side_to_move[engine_idx//2]))
 
 				elif ("bestmove" in line) and (states[engine_idx] == EngineState.WAIT_FOR_BESTMOVE):
 					# node数計測用(60手目までのみ)
@@ -466,35 +698,21 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 								break
 					
 					# 評価値の計測用
-					vs = eval_value_from_thread[engine_idx].split()
-					for j in range(len(vs)):
-						if vs[j] == "score":
-							if j+2 < len(vs):
-								try:
-									v = int(vs[j+2])
-								except:
-									print(f"Error : score = {eval_value_from_thread[engine_idx]}")
-									eval_value_from_thread[engine_idx] = ""
-
-								if vs[j+1] == "cp" :
-									eval_value_from_thread[engine_idx] = str(v)
-								elif vs[j+1] == "mate" :
-									if v >= 0:
-										eval_value_from_thread[engine_idx] = str(32000 - v)
-									else:
-										eval_value_from_thread[engine_idx] = str(-32000 + v)
-							else:
-								eval_value_from_thread[engine_idx] = "?"
-							break
+					parsed_eval = parse_usi_score_info(eval_value_from_thread[engine_idx])
+					if parsed_eval:
+						eval_value_from_thread[engine_idx] = parsed_eval["normalized_score"]
+					else:
+						if eval_value_from_thread[engine_idx]:
+							print(f"Error : score = {eval_value_from_thread[engine_idx]}")
+						eval_value_from_thread[engine_idx] = ""
 
 					# if (not random time)
-					time_setting = options[2 + (engine_idx & 1)]
-					if time_setting[3] == 0:
+					if options[2][3]==0:
 						elapsed_time = int(math.ceil(time.time() - go_times[engine_idx])*1000)
-						r = rest_times[engine_idx] + time_setting[1] - elapsed_time
+						r = rest_times[engine_idx] + options[2][1] - elapsed_time
 
 						if r < 0:
-							r += time_setting[2] # byoyomi加算
+							r += options[2][2] # byoyomi加算
 							if False: # このブロックは常にFalseなので実質無効
 								elapsed_time2 = int((time.time() - go_times[engine_idx])*1000)
 								r = rest_times[engine_idx] + options[2][1] + options[2][2] - elapsed_time2
@@ -514,6 +732,7 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 						else: # 先手エンジンが投了
 							lose += 1
 							gameover = GameResult.P2_WIN # 2P勝ち (エンジン1勝ち)
+						gameover_reasons[engine_idx//2] = "resign"
 						if (moves[engine_idx//2] & 1) == 1: # 後手番で勝った
 							win_black += 1
 						else: # 先手番で勝った
@@ -526,19 +745,54 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 						else: # 後手エンジンが勝ち宣言
 							lose += 1
 							gameover = GameResult.P2_WIN # 2P勝ち (エンジン1勝ち)
+						gameover_reasons[engine_idx//2] = "win_declaration"
 						if (moves[engine_idx//2] & 1) == 0: # 先手番で勝った
 							win_black += 1
 						else: # 後手番で勝った
 							win_white += 1
 						update = True
 					else: # 通常のbestmove
+						selected_move = choose_move_from_candidates(
+							line,
+							candidate_info_from_thread[engine_idx],
+							alt_move_prob,
+							alt_move_margin_cp,
+							alt_move_temperature,
+						)
 						ss = line.split()
 						if sfens[engine_idx//2] != "":
 							sfens[engine_idx//2] += " "
 						try:
-							sfens[engine_idx//2] += ss[1] # 指し手を追加
+							move_to_play = selected_move["move"] if selected_move else ss[1]
+							sfens[engine_idx//2] += move_to_play # 指し手を追加
 							if KifOutput:
 								eval_values[engine_idx//2] += eval_value_from_thread[engine_idx] + " "
+							if save_candidates:
+								candidates = []
+								for key in sorted(candidate_info_from_thread[engine_idx].keys()):
+									candidate = candidate_info_from_thread[engine_idx][key]
+									candidates.append({
+										"multipv": candidate["multipv"],
+										"score_type": candidate["score_type"],
+										"score": candidate["score"],
+										"normalized_score": candidate["normalized_score"],
+										"pv": candidate["pv"],
+									})
+								candidate_values[engine_idx//2].append(candidates)
+								selected_move_meta[engine_idx//2].append({
+									"move": move_to_play,
+									"source": selected_move["source"] if selected_move else "bestmove",
+									"selected_multipv": selected_move["selected_multipv"] if selected_move else 1,
+								})
+							if move_callback:
+								move_callback({
+									"thread_index": engine_idx // 2,
+									"book_index": current_book_indices[engine_idx//2],
+									"pair_index": current_pair_indices[engine_idx//2],
+									"ply": moves[engine_idx//2] + 1,
+									"side_to_move": (moves[engine_idx//2] + initial_side_to_move[engine_idx//2]) & 1,
+									"move": move_to_play,
+								})
 						except:
 							outlog(engine_idx, "Error! " + line)
 
@@ -546,6 +800,7 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 						if moves[engine_idx//2] >= MAX_MOVES: # 256手で引き分け
 							draw += 1
 							gameover = GameResult.DRAW # Draw
+							gameover_reasons[engine_idx//2] = "max_moves"
 							update = True
 						else:
 							go_cmd(engine_idx^1) # 相手のエンジンにgoコマンドを送る
@@ -554,11 +809,39 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 					gameover_cmd(engine_idx, gameover)
 					gameover_cmd(engine_idx^1, gameover)
 					if KifOutput:
-						if kifu_format == "csa":
-							write_csa_game(engine_idx//2, gameover)
-						else:
-							kif_file.write("startpos moves " + sfens[engine_idx//2] + "\n")
-							kif_file.write(eval_values[engine_idx//2] + "\n")
+						record_line = initial_record_lines[engine_idx//2]
+						if sfens[engine_idx//2]:
+							record_line += " moves " + sfens[engine_idx//2]
+						kif_file.write(record_line + "\n")
+						kif_file.write(eval_values[engine_idx//2] + "\n")
+					black_engine = 1 if turns[engine_idx//2] == 0 else 2
+					white_engine = 2 if black_engine == 1 else 1
+					if candidate_file:
+						record = {
+							"initial_position": initial_record_lines[engine_idx//2],
+							"moves": sfens[engine_idx//2].split(),
+							"eval_values": eval_values[engine_idx//2].split(),
+							"candidates": candidate_values[engine_idx//2],
+							"selected_moves": selected_move_meta[engine_idx//2],
+							"black_engine": black_engine,
+							"white_engine": white_engine,
+							"black_engine_name": os.path.basename(engines_full[black_engine - 1]),
+							"white_engine_name": os.path.basename(engines_full[white_engine - 1]),
+							"result": gameover.name,
+							"termination_reason": gameover_reasons[engine_idx//2],
+						}
+						candidate_file.write(json.dumps(record, ensure_ascii=False) + "\n")
+					if result_callback:
+						result_callback({
+							"game_index": win + lose + draw,
+							"book_index": current_book_indices[engine_idx//2],
+							"pair_index": current_pair_indices[engine_idx//2],
+							"result": gameover,
+							"black_engine": black_engine,
+							"white_engine": white_engine,
+							"termination_reason": gameover_reasons[engine_idx//2],
+							"moves": moves[engine_idx//2],
+						})
 					turns[engine_idx//2] = turns[engine_idx//2] ^ 1 # 手番を交代
 
 			elif message['type'] == 'terminated':
@@ -593,6 +876,7 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 					lose += 1
 				else: # エンジン1がタイムアウト -> エンジン0の勝ち
 					win += 1
+				gameover_reasons[i//2] = "timeout"
 				update = True # 状態変化として扱う
 				# タイムアウトした対局を終了させる
 				gameover_cmd(i, GameResult.DRAW)
@@ -601,6 +885,17 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 		# 状態が更新されたら、全体の対局数チェックと途中結果の出力
 		if update:
 			loop_count = win + lose + draw
+			if stop_predicate and stop_predicate(win, lose, draw):
+				for p in procs:
+					if p and p.poll() is None:
+						p.terminate()
+				if FileLogging:
+					log_file.close()
+				if KifOutput:
+					kif_file.close()
+				if candidate_file:
+					candidate_file.close()
+				return win, lose, draw, win_black, win_white
 			if loop_count >= loop :
 				# 指定のloop回数に達したので終了する。
 				for p in procs:
@@ -612,11 +907,9 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 				if FileLogging:
 					log_file.close()
 				if KifOutput:
-					if kifu_format == "csa":
-						for exporter in csa_exporters:
-							exporter.close()
-					else:
-						kif_file.close()
+					kif_file.close()
+				if candidate_file:
+					candidate_file.close()
 				return win, lose, draw, win_black, win_white
 
 			# 一定回数ごとに途中結果を出力
@@ -627,11 +920,7 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 						log_file.write(f"[{i}] State = {states[i]}\n")
 					log_file.flush()
 				if KifOutput:
-					if kifu_format == "csa":
-						for exporter in csa_exporters:
-							exporter.f.flush()
-					else:
-						kif_file.flush()
+					kif_file.flush()
 
 		# メッセージキューの処理とタイムアウト処理の間で短いスリープを挟む
 		time.sleep(0.001)
@@ -667,28 +956,33 @@ def main():
 	
 	# --- Basic settings ---
 	parser.add_argument('--config', type=str, help="Path to a YAML configuration file.")
-	parser.add_argument('--home', type=str, help="Path to the home directory containing 'exe' and 'eval' folders.")
+	parser.add_argument('--home', type=str, help="Base directory used to resolve relative engine/book paths.")
 	parser.add_argument('--engine1', type=str, help="Path or name of engine 1.")
-	parser.add_argument('--eval1', type=str, help="Name of the evaluation function folder for engine 1.")
+	parser.add_argument('--eval1', type=str, default="", help="Optional evaluation directory for engine 1. If omitted, engine_dir/eval is used when present.")
 	parser.add_argument('--engine2', type=str, help="Path or name of engine 2.")
-	parser.add_argument('--eval2', type=str, help="Name of the evaluation function folder for engine 2.")
+	parser.add_argument('--eval2', type=str, default="", help="Optional evaluation directory for engine 2. If omitted, engine_dir/eval is used when present.")
 
 	# --- Game settings ---
 	parser.add_argument('--parallel_games', type=int, default=1, help="Number of games to run in parallel.")
 	parser.add_argument('--engine_threads', type=int, default=1, help="Number of threads for each engine process.")
 	parser.add_argument('--loop', type=int, default=100, help="Total number of games to play.")
-	parser.add_argument('--time', type=str, default="b1000", help="Time control settings (e.g., 'b1000', 'r100', 't300000/i3000').")
+	parser.add_argument('--time', type=str, default="b1000", help="Time control settings (e.g., 'b1000', 'r100', 't300000/i3000', 'd8', 'n100000').")
 	parser.add_argument('--hash1', type=str, default="128", help="Hash size for engine 1 (in MB).")
 	parser.add_argument('--hash2', type=str, default="128", help="Hash size for engine 2 (in MB).")
+	parser.add_argument('--multipv', type=int, default=1, help="Number of candidate lines to request from the engine.")
+	parser.add_argument('--alt_move_prob', type=float, default=0.0, help="Probability of selecting a non-best candidate move when a close alternative exists.")
+	parser.add_argument('--alt_move_margin_cp', type=int, default=-1, help="Maximum centipawn gap from the top candidate for alternative move selection. Negative disables it.")
+	parser.add_argument('--alt_move_temperature', type=float, default=12.0, help="Sampling temperature for close alternative candidate moves.")
 
 	# --- Opening book settings ---
+	parser.add_argument('--book_file', type=str, default="", help="Optional opening SFEN file under home/book or an absolute path. If omitted, games start from the initial position.")
 	parser.add_argument('--book_moves', type=int, default=24, help="Number of moves to follow from the opening book.")
 	parser.add_argument('--rand_book', action='store_true', help="Shuffle the opening book entries.")
 
 	# --- Logging settings ---
 	parser.add_argument('--log', action='store_true', help="Enable file logging for engine communication.")
 	parser.add_argument('--param_log_path', type=str, default="", help="Enable and specify path for parameter logging.")
-	parser.add_argument('--kifu_format', type=str, default="sfen", choices=["sfen", "csa"], help="Output format for game records.")
+	parser.add_argument('--save_candidates', action='store_true', help="Save MultiPV candidate lists to a JSONL sidecar file.")
 	
 	args = parser.parse_args()
 
@@ -702,6 +996,9 @@ def main():
 
 	# 2. 設定ファイルがあれば読み込んでマージ
 	if args.config:
+		if yaml is None:
+			print("PyYAML is required when using --config. Please install it with 'pip install pyyaml'")
+			sys.exit(1)
 		try:
 			with open(args.config, 'r') as f:
 				config_from_file = yaml.safe_load(f)
@@ -717,7 +1014,7 @@ def main():
 			print(f"Warning: Error reading config file: {e}")
 
 	# 3. 必須引数のチェック
-	required_args = ['home', 'engine1', 'eval1', 'engine2', 'eval2']
+	required_args = ['home', 'engine1', 'engine2']
 	for arg in required_args:
 		if not config.get(arg):
 			print(f"Error: Missing required argument: --{arg}. Please specify it via command line or config file.")
@@ -736,72 +1033,57 @@ def main():
 	engine2_path = config['engine2']
 	eval1_path = config['eval1']
 	eval2_path = config['eval2']
+	book_file_path = config['book_file']
 	book_moves = config['book_moves']
+	multipv = config['multipv']
+	alt_move_prob = config['alt_move_prob']
+	alt_move_margin_cp = config['alt_move_margin_cp']
+	alt_move_temperature = config['alt_move_temperature']
 	play_time_list = config['time'].split(",")
 	PARAMETERS_LOG_FILE_PATH = config['param_log_path']
 	rand_book = config['rand_book']
 	fileLogging = config['log']
-	kifu_format = config['kifu_format']
+	save_candidates = config['save_candidates']
 
-	# expand eval_dir
-	evaldirs = []
-	eval2_root = os.path.join(home, "eval", eval2_path)
-	if not os.path.exists(os.path.join(eval2_root, "0")):
-		evaldirs.append(eval2_path)
-	else:
-		i = 0
-		while os.path.exists(os.path.join(eval2_root, str(i))):
-			evaldirs.append(os.path.join(eval2_path, str(i)))
-			i += 1
+	engine1_full, eval1_full = resolve_engine_binary_and_eval(home, engine1_path, eval1_path)
+	engine2_full, eval2_full = resolve_engine_binary_and_eval(home, engine2_path, eval2_path)
+	evaldirs = expand_eval_dirs(eval2_full)
 
 	print("home           : " , home)
 	print("play_time_list : " , play_time_list)
 	print("evaldirs       : " , evaldirs)
 	print("hash size      : " , hashes)
-	print("book_moves     : " , book_moves)
+	print("book_file      : " , book_file_path if book_file_path else "(initial position)")
+	print("book_moves     : " , book_moves if book_file_path else "(disabled)")
+	print("multipv        : " , multipv)
+	print("alt_move_prob  : " , alt_move_prob)
+	print("alt_move_margin_cp : " , alt_move_margin_cp)
+	print("alt_move_temperature : " , alt_move_temperature)
 	print("engine_threads : " , engine_threads)
 	print("rand_book      : " , rand_book)
-	print("kifu_format    : " , kifu_format)
 	print("PARAMETERS_LOG_FILE_PATH : " , PARAMETERS_LOG_FILE_PATH)
+	print("save_candidates: " , save_candidates)
 
 	total_win = total_lose = total_draw = 0
 	total_win_black = total_win_white = 0
 
-	book_file = open(os.path.join(home, "book", "records2016_10818.sfen"),"r")
-	book_sfens = []
-	count = 1
-	for sfen in book_file:
-		s = sfen.split()
-		sf = ""
-		for i in range(book_moves):
-			try:
-				# skip "startpos moves"
-				sf += s[i+2]+" "
-			except:
-				print("Error! " + " in records2016.sfen line = " + str(count))
-		book_sfens.append(sf)
-		count += 1
-		if count % 100 == 0:
-			sys.stdout.write(".")
-			sys.stdout.flush()
-	book_file.close()
-	print()
+	book_positions = load_book_positions(home, book_file_path, book_moves)
 
 	# 定跡をシャッフルする
-	if rand_book:
-		random.shuffle(book_sfens)
+	if rand_book and len(book_positions) > 1:
+		random.shuffle(book_positions)
 
 	# threadsはparallel_gamesに相当。 engine_threadsはエンジンに渡すスレッド数。
 	# 古いthreads = threads // engine_threads の行は不要。
-
 	for evaldir in evaldirs:
-		engine1 = engine_to_full(engine1_path)
-		engine2 = engine_to_full(engine2_path)
+
+		engine1 = engine1_full
+		engine2 = engine2_full
 
 		engines = ( engine1 , engine2 )
-		engines_full = ( os.path.join(home, "exe", engines[0]) , os.path.join(home, "exe", engines[1]) )
-		evals   = ( eval1_path , evaldir )
-		evals_full   = ( os.path.join(home, "eval", eval1_path) , os.path.join(home, "eval", evaldir) )
+		engines_full = engines
+		evals   = ( eval1_full if eval1_full else "(engine default)" , evaldir if evaldir else "(engine default)" )
+		evals_full   = ( eval1_full , evaldir )
 
 		for i in range(2):
 			print("engine" + str(i+1) + " = " + engines[i] + " , eval = " + evals[i])
@@ -809,7 +1091,7 @@ def main():
 		for play_time in play_time_list:
 			print("\nthreads = " + str(threads) + " , loop = " + str(loop) + " , play_time = " + play_time)
 
-			options = create_option(engines,engine_threads,evals_full,play_time,hashes,PARAMETERS_LOG_FILE_PATH)
+			options = create_option(engines,engine_threads,evals_full,play_time,hashes,multipv,PARAMETERS_LOG_FILE_PATH)
 
 			for i in range(2):
 				print("option " + str(i+1) + " = " + ' / '.join(options[i]))
@@ -825,11 +1107,14 @@ def main():
 				options,
 				threads,
 				loop,
-				book_sfens,
+				book_positions,
 				fileLogging,
 				opt2,
 				book_moves,
-				kifu_format=kifu_format,
+				save_candidates,
+				alt_move_prob,
+				alt_move_margin_cp,
+				alt_move_temperature,
 			)
 
 			total_win += w

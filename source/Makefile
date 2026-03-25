@@ -60,6 +60,15 @@ YANEURAOU_EDITION = YANEURAOU_ENGINE_NNUE
 #YANEURAOU_EDITION = YANEURAOU_MATE_ENGINE
 #YANEURAOU_EDITION = USER_ENGINE
 
+EDITION_TARGET_SUFFIX =
+ifneq (,$(findstring YANEURAOU_ENGINE_NNUE,$(YANEURAOU_EDITION)))
+	ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_NNUE)
+		EDITION_TARGET_SUFFIX =-HALFKP_256X2_32_32
+	else
+		EDITION_TARGET_SUFFIX =-$(subst YANEURAOU_ENGINE_NNUE_,,$(YANEURAOU_EDITION))
+	endif
+endif
+
 # ターゲットCPU (target cpu)
 
 # 利用できるCPU拡張命令を指定する。
@@ -75,13 +84,13 @@ YANEURAOU_EDITION = YANEURAOU_ENGINE_NNUE
 
 # macOSの場合、
 # 1. IntelMacでSSE4.2までしか対応していないなら、APPLESSE42 を指定。AVX2に対応しているなら APPLEAVX2を指定する。
-# 2. M1以降のCPUであれば、APPLEM1を指定する。(M2でもM3でもAPPLEM1を指定する。)
+# 2. Apple Silicon であれば、APPLESILICON を指定する。
 
 # --- Intel/AMD系 (x86/x64 Platform)
 #TARGET_CPU = AVX512VNNI
 #TARGET_CPU = AVX512
 #TARGET_CPU = AVXVNNI
-TARGET_CPU = AVX2
+#TARGET_CPU = AVX2
 #TARGET_CPU = SSE42
 #TARGET_CPU = SSE41
 #TARGET_CPU = SSSE3
@@ -91,6 +100,7 @@ TARGET_CPU = AVX2
 #TARGET_CPU = ZEN1
 #TARGET_CPU = ZEN2
 #TARGET_CPU = ZEN3
+TARGET_CPU = ZEN5
 # -- ARMとか
 #TARGET_CPU = OTHER
 #TARGET_CPU = GRAVITON2
@@ -99,7 +109,13 @@ TARGET_CPU = AVX2
 #TARGET_CPU = APPLEAVX2
 #TARGET_CPU = APPLESSE42
 # -- macOS for M1/M2/M3
-#TARGET_CPU = APPLEM1
+#TARGET_CPU = APPLESILICON
+
+# Apple Silicon向けの個別CPU最適化
+# 例:
+#   APPLE_CPU =
+#   APPLE_CPU = apple-m4
+APPLE_CPU =
 
 
 # デバッガーを使用するか (debugger)
@@ -259,7 +275,15 @@ else
 		TARGET = $(TARGETDIR)/YaneuraOu-by-gcc.exe
 	else
 		CPPFLAGS += -D_LINUX
-		TARGET = $(TARGETDIR)/YaneuraOu-by-gcc
+		ifeq ($(filter APPLESILICON APPLEM1,$(TARGET_CPU)),$(TARGET_CPU))
+			ifeq ($(strip $(APPLE_CPU)),)
+				TARGET = $(TARGETDIR)/YaneuraOu-native$(EDITION_TARGET_SUFFIX)
+			else
+				TARGET = $(TARGETDIR)/YaneuraOu-native-$(patsubst apple-%,%,$(APPLE_CPU))$(EDITION_TARGET_SUFFIX)
+			endif
+		else
+			TARGET = $(TARGETDIR)/YaneuraOu-by-gcc
+		endif
 	endif
 endif
 
@@ -599,7 +623,10 @@ CPPFLAGS += -DTARGET_CPU=\"$(TARGET_CPU)\"
 # (USE_BMI2が定義されていない時、自動的にmagic bitboardが用いられる)
 # ZEN3でPEXTの速度がまともになったらしいのでZEN3以降ではBMI2命令を使うようにする。
 
-ifeq ($(TARGET_CPU),ZEN1)
+ifeq ($(TARGET_CPU),ZEN5)
+	CPPFLAGS += -DUSE_AVX512 -DUSE_BMI2 -DUSE_VNNI -mbmi -mbmi2 -mavx512f -mavx512bw -mavx512dq -mavx512vl -mavx512vnni -march=znver4
+
+else ifeq ($(TARGET_CPU),ZEN1)
 	CPPFLAGS += -DUSE_AVX2 -mbmi -mno-bmi2 -mavx2 -march=znver1
 
 else ifeq ($(TARGET_CPU),ZEN2)
@@ -659,8 +686,11 @@ else ifeq ($(TARGET_CPU),APPLEAVX2)
 	CPPFLAGS += -DIS_64BIT -DUSE_AVX2 -DUSE_BMI2 -target x86_64-apple-macos11 -mbmi -mbmi2 -mavx2 -mpopcnt
 else ifeq ($(TARGET_CPU),APPLESSE42)
 	CPPFLAGS += -DIS_64BIT -DUSE_SSE42 -target x86_64-apple-macos11
-else ifeq ($(TARGET_CPU),APPLEM1)
+else ifneq (,$(filter APPLESILICON APPLEM1,$(TARGET_CPU)))
 	CPPFLAGS += -DIS_64BIT -DUSE_NEON -target arm64-apple-macos11
+	ifneq ($(strip $(APPLE_CPU)),)
+		CPPFLAGS += -mcpu=$(APPLE_CPU)
+	endif
 else ifeq ($(TARGET_CPU),WASM)
 
 else ifeq ($(TARGET_CPU),OTHER)
