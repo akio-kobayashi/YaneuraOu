@@ -30,9 +30,8 @@ namespace Layers {
 
 // Define layers
 using InputLayer = InputSlice<kTransformedFeatureDimensions * 2>;
-// 仕様: Descriptionより L1出力=8, L2出力=96, L3出力=1
-using L1 = AffineTransformSparseInput<InputLayer, 8>; 
-using L2 = AffineTransform<SqrClippedReLU<L1>, 96>;
+using L1 = AffineTransformSparseInput<InputLayer, 32>;
+using L2 = AffineTransform<ClippedReLU<L1>, 32>;
 using L3 = AffineTransform<ClippedReLU<L2>, 1>;
 
 }  // namespace Layers
@@ -47,18 +46,29 @@ struct Network {
     using OutputType = std::int32_t;
     static constexpr IndexType kOutputDimensions = 1;
 
+    static constexpr std::uint32_t LayerStackHashValue(std::uint32_t prev_hash) {
+        std::uint32_t hash_value = 0xB58B6A8Du;
+        hash_value += LayerStacks;
+        hash_value ^= prev_hash >> 1;
+        hash_value ^= prev_hash << 31;
+        return hash_value;
+    }
+
     static constexpr std::uint32_t GetHashValue() {
-        return 0x7AF32F16u; // 仕様書のVersion/Hashに合わせる
+        auto hash_value = LayerStackHashValue(Layers::InputLayer::GetHashValue());
+        hash_value = Layers::L2::GetHashValue(Layers::ClippedReLU<Layers::L1>::GetHashValue(hash_value));
+        hash_value = Layers::L3::GetHashValue(Layers::ClippedReLU<Layers::L2>::GetHashValue(hash_value));
+        return hash_value;
     }
 
     static std::string GetStructureString() {
-        // 仕様書の例に合わせる
-        return "LayerStack[8x8<-2048](InputSlice[2048](0:2048))";
+        return "AffineTransform[1<-32](ClippedReLU[32](AffineTransform[32<-32]"
+            "(ClippedReLU[32](LayerStack[8x32<-512](InputSlice[512(0:512)])))))";
     }
 
     struct alignas(kCacheLineSize) Buffer {
         alignas(kCacheLineSize) typename Layers::L1::OutputBuffer fc_0_out;
-        alignas(kCacheLineSize) typename Layers::SqrClippedReLU<Layers::L1>::OutputBuffer ac_0_out;
+        alignas(kCacheLineSize) typename Layers::ClippedReLU<Layers::L1>::OutputBuffer ac_0_out;
         alignas(kCacheLineSize) typename Layers::L2::OutputBuffer fc_1_out;
         alignas(kCacheLineSize) typename Layers::ClippedReLU<Layers::L2>::OutputBuffer ac_1_out;
         alignas(kCacheLineSize) typename Layers::L3::OutputBuffer fc_2_out;
@@ -69,28 +79,16 @@ struct Network {
     const OutputType* Propagate(const TransformedFeatureType* transformedFeatures, char* buffer, int bucket = 0) const {
         auto& buf = *reinterpret_cast<Buffer*>(buffer);
 
-        // 仕様に基づき、選択されたバケットのL1を使用
         fc_0[bucket].Propagate(transformedFeatures, buf.fc_0_out);
-        
-        // SCReLU (SqrClippedReLU) 適用 (指示書 3項)
-        Layers::SqrClippedReLU<Layers::L1> ac_0;
+        Layers::ClippedReLU<Layers::L1> ac_0;
         ac_0.Propagate(buf.fc_0_out, buf.ac_0_out);
-
-        // L2層
         fc_1.Propagate(buf.ac_0_out, buf.fc_1_out);
-        
-        // L2後のClippedReLU (Descriptionより)
         Layers::ClippedReLU<Layers::L2> ac_1;
         ac_1.Propagate(buf.fc_1_out, buf.ac_1_out);
-
-        // L3層 (Output)
         fc_2.Propagate(buf.ac_1_out, buf.fc_2_out);
 
         return buf.fc_2_out;
     }
-
-    // Read/Write Parameters (明示的に実装する必要がある場合はここに追加)
-    // 今回は evaluate_nnue.cpp 側で個別に ReadParameters を呼ぶ。
 };
 
 }  // namespace Eval::NNUE
