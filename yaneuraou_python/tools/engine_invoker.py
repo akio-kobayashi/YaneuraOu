@@ -34,6 +34,51 @@ class GameResult(Enum):
 
 MAX_MOVES = 256
 
+
+def load_book_positions(home, book_file, book_moves):
+	if not book_file:
+		return [""]
+
+	book_path = book_file
+	if not os.path.isabs(book_path):
+		book_path = os.path.join(home, "book", book_file)
+
+	book_sfens = []
+	with open(book_path, "r") as f:
+		for line_no, sfen in enumerate(f, start=1):
+			s = sfen.split()
+			if not s:
+				continue
+
+			if len(s) >= 2 and s[0] == "startpos" and s[1] == "moves":
+				move_tokens = s[2:]
+			else:
+				move_tokens = s
+
+			sf = " ".join(move_tokens[:book_moves]).strip()
+			if len(move_tokens) < book_moves:
+				print("Warning: short book line at " + str(line_no) + " in " + book_path)
+			book_sfens.append(sf)
+
+	if not book_sfens:
+		return [""]
+	return book_sfens
+
+
+def resolve_engine_binary_and_eval(home, engine, eval_dir):
+	engine_path = engine_to_full(engine)
+	if not os.path.isabs(engine_path):
+		engine_path = os.path.join(home, "exe", engine_path)
+
+	resolved_eval_dir = ""
+	if eval_dir:
+		if os.path.isabs(eval_dir):
+			resolved_eval_dir = eval_dir
+		else:
+			resolved_eval_dir = os.path.join(home, "eval", eval_dir)
+
+	return engine_path, resolved_eval_dir
+
 # ======================================================================
 # グローバル変数
 # ======================================================================
@@ -68,7 +113,13 @@ def output_rating(win,draw,lose,win_black,win_white,opt2):
 
 
 # 思考エンジンに対するオプションを生成する。
-def create_option(engines,engine_threads,evals,times,hashes,PARAMETERS_LOG_FILE_PATH):
+def create_option(engines,engine_threads,evals,times,hashes,multipv_or_param_log_path=1,PARAMETERS_LOG_FILE_PATH=""):
+
+	if isinstance(multipv_or_param_log_path, str):
+		multipv = 1
+		PARAMETERS_LOG_FILE_PATH = multipv_or_param_log_path
+	else:
+		multipv = multipv_or_param_log_path
 
 	# 思考エンジンに対するコマンド列を保存する。
 	options = []
@@ -124,6 +175,7 @@ def create_option(engines,engine_threads,evals,times,hashes,PARAMETERS_LOG_FILE_
 			option.append("setoption name Threads value " + str(engine_threads))
 			option.append("setoption name EvalDir value " + evals[i])
 			option.append("setoption name Hash value " + str(hashes[i]))
+			option.append("setoption name MultiPV value " + str(multipv))
 			option.append("setoption name BookFile value no_book")
 			option.append("setoption name MinimumThinkingTime value 1000")
 			option.append("setoption name NetworkDelay value 0")
@@ -156,6 +208,7 @@ def create_option(engines,engine_threads,evals,times,hashes,PARAMETERS_LOG_FILE_
 
 			option.append("setoption name Threads value " + str(engine_threads))
 			option.append("setoption name USI_Hash value " + str(hashes[i]))
+			option.append("setoption name MultiPV value " + str(multipv))
 #			option.append("setoption name EvalDir value " + evals[i])
 
 			if "SILENT_MAJORITY" in engines[i]:
@@ -194,7 +247,23 @@ def read_engine_output(engine_idx, proc, message_queue):
 #  book_sfens : 定跡
 #  opt2       : 勝敗の表示の先頭にT2,b2000 のように対局条件を文字列化して突っ込む用。
 #  book_moves : 定跡の手数
-def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_moves,kifu_format="sfen"):
+def vs_match(
+	engines_full,
+	options,
+	threads,
+	loop,
+	book_sfens,
+	fileLogging,
+	opt2,
+	book_moves,
+	save_candidates=False,
+	alt_move_prob=0.0,
+	alt_move_margin_cp=-1,
+	alt_move_temperature=12.0,
+	result_callback=None,
+	paired_openings=False,
+	kifu_format="sfen",
+):
 
 	win = lose = draw = 0
 	win_black = win_white = 0
@@ -551,6 +620,12 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 							go_cmd(engine_idx^1) # 相手のエンジンにgoコマンドを送る
 				
 				if gameover != GameResult.NO_RESULT:
+					if result_callback is not None:
+						game_count = win + lose + draw
+						result_callback({
+							"result": gameover,
+							"pair_index": game_count // 2 if paired_openings else game_count,
+						})
 					gameover_cmd(engine_idx, gameover)
 					gameover_cmd(engine_idx^1, gameover)
 					if KifOutput:
