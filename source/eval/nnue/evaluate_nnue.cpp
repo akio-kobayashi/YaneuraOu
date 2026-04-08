@@ -299,7 +299,7 @@ namespace {
 					if (!network->fc_0[i].ReadParameters(stream).is_ok()) return Tools::ResultCode::FileReadError;
 				}
 			} else {
-				if (!network->fc_0.ReadParameters(stream).is_ok()) return Tools::ResultCode::FileReadError;
+				if (!network->fc_0[0].ReadParameters(stream).is_ok()) return Tools::ResultCode::FileReadError;
 			}
 			
 			// L2, Output層 (共通) の読み込み
@@ -326,7 +326,7 @@ namespace {
 				if (!network->fc_0[i].WriteParameters(stream)) return false;
 			}
 		} else {
-			if (!network->fc_0.WriteParameters(stream)) return false;
+			if (!network->fc_0[0].WriteParameters(stream)) return false;
 		}
 
 		if (!network->fc_1.WriteParameters(stream)) return false;
@@ -359,9 +359,9 @@ namespace {
 
 	        int npm = 0;
 	        for (const auto& entry : kNpmPieces) {
-	            npm += (popcount(pos.pieces(WHITE, entry.base)) + popcount(pos.pieces(BLACK, entry.base))) * entry.value;
+	            npm += (POPCNT64(pos.pieces(WHITE, entry.base).merge()) + POPCNT64(pos.pieces(BLACK, entry.base).merge())) * entry.value;
 	            if (entry.promoted != NO_PIECE_TYPE) {
-	                npm += (popcount(pos.pieces(WHITE, entry.promoted)) + popcount(pos.pieces(BLACK, entry.promoted))) * entry.value;
+	                npm += (POPCNT64(pos.pieces(WHITE, entry.promoted).merge()) + POPCNT64(pos.pieces(BLACK, entry.promoted).merge())) * entry.value;
 	            }
 	        }
 

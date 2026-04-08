@@ -7,9 +7,9 @@
 #include "../features/half_kp.h"
 
 #include "../layers/input_slice.h"
-#include "../layers/affine_transform.h"
-#include "../layers/affine_transform_sparse_input.h"
-#include "../layers/clipped_relu.h"
+#include "../layers/affine_transform_explicit.h"
+#include "../layers/affine_transform_sparse_input_explicit.h"
+#include "../layers/clipped_relu_explicit.h"
 
 namespace YaneuraOu {
 namespace Eval::NNUE {
@@ -28,11 +28,12 @@ constexpr int LayerStacks = 8;
 
 namespace Layers {
 
-// Define layers
 using InputLayer = InputSlice<kTransformedFeatureDimensions * 2>;
-using L1 = AffineTransformSparseInput<InputLayer, 32>;
-using L2 = AffineTransform<ClippedReLU<L1>, 32>;
-using L3 = AffineTransform<ClippedReLU<L2>, 1>;
+using L1 = AffineTransformSparseInputExplicit<kTransformedFeatureDimensions * 2, 32>;
+using A1 = ClippedReLUExplicit<32>;
+using L2 = AffineTransformExplicit<32, 32>;
+using A2 = ClippedReLUExplicit<32>;
+using L3 = AffineTransformExplicit<32, 1>;
 
 }  // namespace Layers
 
@@ -56,8 +57,8 @@ struct Network {
 
     static constexpr std::uint32_t GetHashValue() {
         auto hash_value = LayerStackHashValue(Layers::InputLayer::GetHashValue());
-        hash_value = Layers::L2::GetHashValue(Layers::ClippedReLU<Layers::L1>::GetHashValue(hash_value));
-        hash_value = Layers::L3::GetHashValue(Layers::ClippedReLU<Layers::L2>::GetHashValue(hash_value));
+        hash_value = Layers::L2::GetHashValue(Layers::A1::GetHashValue(hash_value));
+        hash_value = Layers::L3::GetHashValue(Layers::A2::GetHashValue(hash_value));
         return hash_value;
     }
 
@@ -68,9 +69,9 @@ struct Network {
 
     struct alignas(kCacheLineSize) Buffer {
         alignas(kCacheLineSize) typename Layers::L1::OutputBuffer fc_0_out;
-        alignas(kCacheLineSize) typename Layers::ClippedReLU<Layers::L1>::OutputBuffer ac_0_out;
+        alignas(kCacheLineSize) typename Layers::A1::OutputBuffer ac_0_out;
         alignas(kCacheLineSize) typename Layers::L2::OutputBuffer fc_1_out;
-        alignas(kCacheLineSize) typename Layers::ClippedReLU<Layers::L2>::OutputBuffer ac_1_out;
+        alignas(kCacheLineSize) typename Layers::A2::OutputBuffer ac_1_out;
         alignas(kCacheLineSize) typename Layers::L3::OutputBuffer fc_2_out;
     };
 
@@ -80,10 +81,10 @@ struct Network {
         auto& buf = *reinterpret_cast<Buffer*>(buffer);
 
         fc_0[bucket].Propagate(transformedFeatures, buf.fc_0_out);
-        Layers::ClippedReLU<Layers::L1> ac_0;
+        Layers::A1 ac_0;
         ac_0.Propagate(buf.fc_0_out, buf.ac_0_out);
         fc_1.Propagate(buf.ac_0_out, buf.fc_1_out);
-        Layers::ClippedReLU<Layers::L2> ac_1;
+        Layers::A2 ac_1;
         ac_1.Propagate(buf.fc_1_out, buf.ac_1_out);
         fc_2.Propagate(buf.ac_1_out, buf.fc_2_out);
 
