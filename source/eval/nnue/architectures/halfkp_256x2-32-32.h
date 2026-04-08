@@ -25,10 +25,12 @@ constexpr IndexType kTransformedFeatureDimensions = 256;
 
 // Number of networks stored in the evaluation file
 constexpr int LayerStacks = 8;
+constexpr std::uint32_t MoEHashSeed = 0x94A3EDE7u;
 
 namespace Layers {
 
 using InputLayer = InputSlice<kTransformedFeatureDimensions * 2>;
+using Router = AffineTransformExplicit<kTransformedFeatureDimensions * 2, LayerStacks>;
 using L1 = AffineTransformSparseInputExplicit<kTransformedFeatureDimensions * 2, 32>;
 using A1 = ClippedReLUExplicit<32>;
 using L2 = AffineTransformExplicit<32, 32>;
@@ -38,8 +40,8 @@ using L3 = AffineTransformExplicit<32, 1>;
 }  // namespace Layers
 
 struct Network {
-    // ネットワーク構造の定義
-    // 仕様に基づき L1 (fc_0) のみをスタック化する
+    // 仕様に基づき 512->32 層だけを expert 化し、router は同じ 512 次元入力を見る。
+    Layers::Router router;
     Layers::L1 fc_0[LayerStacks];
     Layers::L2 fc_1;
     Layers::L3 fc_2;
@@ -47,16 +49,25 @@ struct Network {
     using OutputType = std::int32_t;
     static constexpr IndexType kOutputDimensions = 1;
 
-    static constexpr std::uint32_t LayerStackHashValue(std::uint32_t prev_hash) {
-        std::uint32_t hash_value = 0xB58B6A8Du;
-        hash_value += LayerStacks;
+    static constexpr std::uint32_t AffineHashValue(std::uint32_t prev_hash, IndexType out_dims) {
+        std::uint32_t hash_value = 0xCC03DAE4u;
+        hash_value += out_dims;
         hash_value ^= prev_hash >> 1;
         hash_value ^= prev_hash << 31;
         return hash_value;
     }
 
+    static constexpr std::uint32_t MoEHashValue(std::uint32_t prev_hash) {
+        std::uint32_t hash_value = MoEHashSeed;
+        hash_value += LayerStacks;
+        hash_value ^= prev_hash >> 1;
+        hash_value ^= prev_hash << 31;
+        return AffineHashValue(hash_value, 32);
+    }
+
     static constexpr std::uint32_t GetHashValue() {
-        auto hash_value = LayerStackHashValue(Layers::InputLayer::GetHashValue());
+        auto hash_value = AffineHashValue(Layers::InputLayer::GetHashValue(), LayerStacks);
+        hash_value = MoEHashValue(hash_value);
         hash_value = Layers::L2::GetHashValue(Layers::A1::GetHashValue(hash_value));
         hash_value = Layers::L3::GetHashValue(Layers::A2::GetHashValue(hash_value));
         return hash_value;
@@ -64,10 +75,11 @@ struct Network {
 
     static std::string GetStructureString() {
         return "AffineTransform[1<-32](ClippedReLU[32](AffineTransform[32<-32]"
-            "(ClippedReLU[32](LayerStack[8x32<-512](InputSlice[512(0:512)])))))";
+            "(ClippedReLU[32](MoE[8x32<-512](AffineTransform[8<-512](InputSlice[512(0:512)]))))))";
     }
 
     struct alignas(kCacheLineSize) Buffer {
+        alignas(kCacheLineSize) typename Layers::Router::OutputBuffer router_out;
         alignas(kCacheLineSize) typename Layers::L1::OutputBuffer fc_0_out;
         alignas(kCacheLineSize) typename Layers::A1::OutputBuffer ac_0_out;
         alignas(kCacheLineSize) typename Layers::L2::OutputBuffer fc_1_out;
@@ -76,6 +88,21 @@ struct Network {
     };
 
     static constexpr std::size_t kBufferSize = sizeof(Buffer);
+
+    int SelectExpert(const TransformedFeatureType* transformedFeatures, char* buffer) const {
+        auto& buf = *reinterpret_cast<Buffer*>(buffer);
+        router.Propagate(transformedFeatures, buf.router_out);
+
+        int best = 0;
+        auto best_score = buf.router_out[0];
+        for (int i = 1; i < LayerStacks; ++i) {
+            if (buf.router_out[i] > best_score) {
+                best_score = buf.router_out[i];
+                best = i;
+            }
+        }
+        return best;
+    }
 
     const OutputType* Propagate(const TransformedFeatureType* transformedFeatures, char* buffer, int bucket = 0) const {
         auto& buf = *reinterpret_cast<Buffer*>(buffer);

@@ -293,13 +293,9 @@ namespace {
 			std::uint32_t fc_hash;
 			stream.read(reinterpret_cast<char*>(&fc_hash), sizeof(fc_hash));
 
-			if (kLayerStacks > 1) {
-				// LayerStack (L1) 8つのバケットを連続して読み込む
-				for (int i = 0; i < kLayerStacks; ++i) {
-					if (!network->fc_0[i].ReadParameters(stream).is_ok()) return Tools::ResultCode::FileReadError;
-				}
-			} else {
-				if (!network->fc_0[0].ReadParameters(stream).is_ok()) return Tools::ResultCode::FileReadError;
+			if (!network->router.ReadParameters(stream).is_ok()) return Tools::ResultCode::FileReadError;
+			for (int i = 0; i < kLayerStacks; ++i) {
+				if (!network->fc_0[i].ReadParameters(stream).is_ok()) return Tools::ResultCode::FileReadError;
 			}
 			
 			// L2, Output層 (共通) の読み込み
@@ -321,12 +317,9 @@ namespace {
 		std::uint32_t fc_hash = 0; // 適宜計算
 		stream.write(reinterpret_cast<char*>(&fc_hash), sizeof(fc_hash));
 
-		if (kLayerStacks > 1) {
-			for (int i = 0; i < kLayerStacks; ++i) {
-				if (!network->fc_0[i].WriteParameters(stream)) return false;
-			}
-		} else {
-			if (!network->fc_0[0].WriteParameters(stream)) return false;
+		if (!network->router.WriteParameters(stream)) return false;
+		for (int i = 0; i < kLayerStacks; ++i) {
+			if (!network->fc_0[i].WriteParameters(stream)) return false;
 		}
 
 		if (!network->fc_1.WriteParameters(stream)) return false;
@@ -385,8 +378,8 @@ namespace {
         feature_transformer->Transform(pos, transformed_features, refresh);
         alignas(kCacheLineSize) char buffer[Network::kBufferSize];
 
-        const auto bucket = kLayerStacks > 1 ? stack_index_for_nnue(pos) : 0;
-        const auto output = network->Propagate(transformed_features, buffer, bucket);
+        const auto expert = network->SelectExpert(transformed_features, buffer);
+        const auto output = network->Propagate(transformed_features, buffer, expert);
 
 	        // VALUE_MAX_EVALより大きな値が返ると探索が不安定になるためクリップする。
 	        auto score = static_cast<Value>(output[0] / FV_SCALE);

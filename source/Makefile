@@ -88,7 +88,7 @@ ifneq (,$(findstring YANEURAOU_ENGINE_NNUE,$(YANEURAOU_EDITION)))
 	endif
 endif
 
-BUILD_FLAVOR_SUFFIX = -layerstack
+BUILD_FLAVOR_SUFFIX = -moe
 
 # ターゲットCPU (target cpu)
 
