@@ -35,49 +35,126 @@ class GameResult(Enum):
 MAX_MOVES = 256
 
 
+def parse_book_line(line, book_moves):
+	parts = line.strip().split()
+	if not parts:
+		return None
+
+	if parts[0] == "startpos":
+		move_tokens = []
+		if len(parts) >= 2 and parts[1] == "moves":
+			move_tokens = parts[2:]
+		if book_moves > 0:
+			move_tokens = move_tokens[:book_moves]
+		record_line = "startpos"
+		if move_tokens:
+			record_line += " moves " + " ".join(move_tokens)
+		return {
+			"position_command": "position " + record_line,
+			"record_line": record_line,
+			"initial_move_count": len(move_tokens),
+			"side_to_move": len(move_tokens) & 1,
+		}
+
+	if parts[0] == "sfen":
+		if len(parts) < 5 or parts[2] not in ("b", "w"):
+			return None
+		record_line = " ".join(parts[:5])
+		if len(parts) > 5:
+			if parts[5] != "moves":
+				return None
+			move_tokens = parts[6:]
+			if book_moves > 0:
+				move_tokens = move_tokens[:book_moves]
+			if move_tokens:
+				record_line += " moves " + " ".join(move_tokens)
+		return {
+			"position_command": "position " + record_line,
+			"record_line": record_line,
+			"initial_move_count": 0,
+			"side_to_move": 0 if parts[2] == "b" else 1,
+		}
+
+	return None
+
+
 def load_book_positions(home, book_file, book_moves):
 	if not book_file:
-		return [""]
+		return [{
+			"position_command": "position startpos",
+			"record_line": "startpos",
+			"initial_move_count": 0,
+			"side_to_move": 0,
+		}]
 
 	book_path = book_file
 	if not os.path.isabs(book_path):
 		book_path = os.path.join(home, "book", book_file)
 
-	book_sfens = []
+	book_positions = []
 	with open(book_path, "r") as f:
 		for line_no, sfen in enumerate(f, start=1):
-			s = sfen.split()
-			if not s:
-				continue
-
-			if len(s) >= 2 and s[0] == "startpos" and s[1] == "moves":
-				move_tokens = s[2:]
+			book_position = parse_book_line(sfen, book_moves)
+			if book_position is None:
+				print("Error! " + " in " + os.path.basename(book_path) + " line = " + str(line_no))
 			else:
-				move_tokens = s
+				book_positions.append(book_position)
+			if line_no % 100 == 0:
+				sys.stdout.write(".")
+				sys.stdout.flush()
 
-			sf = " ".join(move_tokens[:book_moves]).strip()
-			if len(move_tokens) < book_moves:
-				print("Warning: short book line at " + str(line_no) + " in " + book_path)
-			book_sfens.append(sf)
+	if not book_positions:
+		raise ValueError(f"No valid opening positions found in {book_path}")
 
-	if not book_sfens:
-		return [""]
-	return book_sfens
+	print()
+	return book_positions
+
+
+def resolve_engine_path(home, engine_path):
+	resolved_engine = engine_to_full(engine_path)
+	if os.path.isabs(resolved_engine):
+		return resolved_engine
+	return os.path.join(home, resolved_engine)
 
 
 def resolve_engine_binary_and_eval(home, engine, eval_dir):
-	engine_path = engine_to_full(engine)
-	if not os.path.isabs(engine_path):
-		engine_path = os.path.join(home, "exe", engine_path)
+	resolved_engine = resolve_engine_path(home, engine)
+	engine_dir = resolved_engine if os.path.isdir(resolved_engine) else os.path.dirname(resolved_engine)
 
-	resolved_eval_dir = ""
+	if os.path.isdir(resolved_engine):
+		candidates = [
+			os.path.join(resolved_engine, "YaneuraOu-native"),
+			os.path.join(resolved_engine, "YaneuraOu-by-gcc"),
+			os.path.join(resolved_engine, "YaneuraOu-apple_m2"),
+		]
+		binary_path = ""
+		for candidate in candidates:
+			if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+				binary_path = candidate
+				break
+		if not binary_path:
+			for entry in os.listdir(resolved_engine):
+				candidate = os.path.join(resolved_engine, entry)
+				if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+					binary_path = candidate
+					break
+		if not binary_path:
+			raise FileNotFoundError(f"No executable engine binary found under {resolved_engine}")
+	else:
+		binary_path = resolved_engine
+
 	if eval_dir:
 		if os.path.isabs(eval_dir):
 			resolved_eval_dir = eval_dir
 		else:
-			resolved_eval_dir = os.path.join(home, "eval", eval_dir)
+			engine_local_eval = os.path.join(engine_dir, eval_dir)
+			legacy_eval = os.path.join(home, "eval", eval_dir)
+			resolved_eval_dir = engine_local_eval if os.path.exists(engine_local_eval) else legacy_eval
+	else:
+		default_engine_eval = os.path.join(engine_dir, "eval")
+		resolved_eval_dir = default_engine_eval if os.path.exists(default_engine_eval) else ""
 
-	return engine_path, resolved_eval_dir
+	return binary_path, resolved_eval_dir
 
 # ======================================================================
 # グローバル変数
@@ -173,8 +250,9 @@ def create_option(engines,engine_threads,evals,times,hashes,multipv_or_param_log
 				option.append("go btime REST_TIME wtime REST_TIME byoyomi " + str(byoyomi))
 
 			option.append("setoption name Threads value " + str(engine_threads))
-			option.append("setoption name EvalDir value " + evals[i])
-			option.append("setoption name Hash value " + str(hashes[i]))
+			if evals[i]:
+				option.append("setoption name EvalDir value " + evals[i])
+			option.append("setoption name USI_Hash value " + str(hashes[i]))
 			option.append("setoption name MultiPV value " + str(multipv))
 			option.append("setoption name BookFile value no_book")
 			option.append("setoption name MinimumThinkingTime value 1000")
@@ -209,7 +287,8 @@ def create_option(engines,engine_threads,evals,times,hashes,multipv_or_param_log
 			option.append("setoption name Threads value " + str(engine_threads))
 			option.append("setoption name USI_Hash value " + str(hashes[i]))
 			option.append("setoption name MultiPV value " + str(multipv))
-#			option.append("setoption name EvalDir value " + evals[i])
+			if evals[i]:
+				option.append("setoption name EvalDir value " + evals[i])
 
 			if "SILENT_MAJORITY" in engines[i]:
 				option.append("setoption name Byoyomi_Margin value 0")
@@ -277,6 +356,9 @@ def vs_match(
 	# --- 状態変数の初期化 ---
 	# 対局ごとの状態
 	sfens = [""] * threads
+	initial_position_commands = ["position startpos"] * threads
+	initial_record_lines = ["startpos"] * threads
+	initial_side_to_move = [0] * threads
 	eval_values = [""] * threads
 	moves = [0] * threads
 	turns = [0] * threads
@@ -386,7 +468,7 @@ def vs_match(
 	def go_cmd(i):
 		p = procs[i]
 		# USI "position"
-		s = "position startpos"
+		s = initial_position_commands[i//2]
 		if sfens[i//2] != "":
 			s += " moves " + sfens[i//2]
 		send_cmd(i,s)
@@ -405,10 +487,15 @@ def vs_match(
 	def usinewgame_cmd(i,sfen_no):
 		p = procs[i]
 		send_cmd(i,"usinewgame")
-		sfens[i//2] = book_sfens[sfen_no]
+		book_position = book_sfens[sfen_no]
+		sfens[i//2] = ""
+		initial_position_commands[i//2] = book_position["position_command"]
+		initial_record_lines[i//2] = book_position["record_line"]
+		initial_side_to_move[i//2] = book_position["side_to_move"]
 		moves[i//2] = 0
 		# 定跡の評価値はよくわからんので0にしとくしかない。
-		eval_values[i//2] = "0 "*book_moves
+		initial_moves = book_position["initial_move_count"]
+		eval_values[i//2] = ("0 " * initial_moves) if initial_moves else ""
 
 	# ゲームオーバーのハンドラ
 	# i : engine index
@@ -522,7 +609,7 @@ def vs_match(
 						sfen_no = (sfen_no + 1) % len(book_sfens)
 
 						# 先手→後手、交互に行う。
-						go_cmd((engine_idx & ~1) + turns[engine_idx//2])
+						go_cmd((engine_idx & ~1) + (turns[engine_idx//2] ^ initial_side_to_move[engine_idx//2]))
 
 				elif ("bestmove" in line) and (states[engine_idx] == EngineState.WAIT_FOR_BESTMOVE):
 					# node数計測用(60手目までのみ)
@@ -632,7 +719,7 @@ def vs_match(
 						if kifu_format == "csa":
 							write_csa_game(engine_idx//2, gameover)
 						else:
-							kif_file.write("startpos moves " + sfens[engine_idx//2] + "\n")
+							kif_file.write(initial_record_lines[engine_idx//2] + (" moves " + sfens[engine_idx//2] if sfens[engine_idx//2] else "") + "\n")
 							kif_file.write(eval_values[engine_idx//2] + "\n")
 					turns[engine_idx//2] = turns[engine_idx//2] ^ 1 # 手番を交代
 
