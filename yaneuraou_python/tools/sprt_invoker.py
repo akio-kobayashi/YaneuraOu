@@ -3,7 +3,14 @@ import math
 import sys
 import os
 import yaml
-from engine_invoker import vs_match, create_option, engine_to_full
+from engine_invoker import (
+    vs_match,
+    create_option,
+    engine_to_full,
+    load_book_positions,
+    resolve_engine_full_path,
+    resolve_eval_full_path,
+)
 
 # ======================================================================
 # SPRT (Sequential Probability Ratio Test) クラス
@@ -63,14 +70,17 @@ def main():
     parser = argparse.ArgumentParser(description="SPRT test for YaneuraOu engines.")
     
     # Engine & Match settings (Same as engine_invoker)
-    parser.add_argument('--home', type=str, required=True)
+    parser.add_argument('--home', type=str, required=True, help="Base directory for relative eval/book paths. Engine paths are used as given.")
     parser.add_argument('--engine1', type=str, required=True)
-    parser.add_argument('--eval1', type=str, required=True)
+    parser.add_argument('--eval1', type=str, default="", help="Optional evaluation directory for engine 1. If omitted, engine_dir/eval is used when present.")
     parser.add_argument('--engine2', type=str, required=True)
-    parser.add_argument('--eval2', type=str, required=True)
+    parser.add_argument('--eval2', type=str, default="", help="Optional evaluation directory for engine 2. If omitted, engine_dir/eval is used when present.")
     parser.add_argument('--parallel_games', type=int, default=2)
     parser.add_argument('--engine_threads', type=int, default=1)
     parser.add_argument('--time', type=str, default="b1000")
+    parser.add_argument('--resign_value', type=str, default="4000", help="Set USI ResignValue for YaneuraOu engines. Empty string leaves engine default.")
+    parser.add_argument('--max_moves_to_draw', type=str, default="320", help="Set USI MaxMovesToDraw for YaneuraOu engines. Empty string leaves engine default.")
+    parser.add_argument('--book_file', type=str, default="", help="Optional opening SFEN file under home/book or an absolute path. If omitted, games start from the initial position.")
     parser.add_argument('--book_moves', type=int, default=24)
     parser.add_argument('--max_games', type=int, default=2000, help="Max games to prevent infinite loop.")
 
@@ -88,23 +98,29 @@ def main():
     print(f"Bounds: Lower={sprt.lower_bound:.4f}, Upper={sprt.upper_bound:.4f}")
 
     # 定跡の読み込み
-    book_path = os.path.join(args.home, "book", "records2016_10818.sfen")
-    book_sfens = []
-    with open(book_path, "r") as f:
-        for line in f:
-            s = line.split()
-            sf = ""
-            for i in range(args.book_moves):
-                try: sf += s[i+2] + " "
-                except: break
-            book_sfens.append(sf)
+    book_positions = load_book_positions(args.home, args.book_file, args.book_moves)
 
     # エンジン設定の準備
     e1 = engine_to_full(args.engine1)
     e2 = engine_to_full(args.engine2)
-    engines_full = (os.path.join(args.home, "exe", e1), os.path.join(args.home, "exe", e2))
-    evals_full = (os.path.join(args.home, "eval", args.eval1), os.path.join(args.home, "eval", args.eval2))
-    options = create_option([e1, e2], args.engine_threads, evals_full, args.time, ["128", "128"], "")
+    engines_full = (
+        resolve_engine_full_path(args.home, e1),
+        resolve_engine_full_path(args.home, e2),
+    )
+    evals_full = (
+        resolve_eval_full_path(args.home, engines_full[0], args.eval1),
+        resolve_eval_full_path(args.home, engines_full[1], args.eval2),
+    )
+    options = create_option(
+        [e1, e2],
+        args.engine_threads,
+        evals_full,
+        args.time,
+        ["128", "128"],
+        "",
+        args.resign_value,
+        args.max_moves_to_draw,
+    )
 
     # 対局ループ
     # 注: engine_invoker の vs_match は一度に大量の対局を回すため、
@@ -123,7 +139,7 @@ def main():
         # engine_invoker.py の vs_match はループ回数(loop)を指定して一気に回す仕様
         # そのため、loop=batch_size で呼び出す。
         
-        w, l, d, wb, ww = vs_match(engines_full, options, args.parallel_games, batch_size, book_sfens, False, "SPRT", args.book_moves)
+        w, l, d, wb, ww = vs_match(engines_full, options, args.parallel_games, batch_size, book_positions, False, "SPRT", args.book_moves)
         
         total_wins += w
         total_losses += l

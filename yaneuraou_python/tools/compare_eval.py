@@ -5,6 +5,7 @@ import json
 import math
 import os
 import queue
+import random
 import subprocess
 import sys
 import threading
@@ -214,6 +215,15 @@ def format_score(score_type, score, normalized_score):
     return f"{score_type} {score} ({normalized_score})"
 
 
+def select_positions(positions, skip, limit, sample_seed):
+    if skip:
+        positions = positions[skip:]
+    if limit > 0 and len(positions) > limit:
+        rng = random.Random(sample_seed)
+        positions = rng.sample(positions, limit)
+    return positions
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Compare per-position evaluation scores between two USI engines.",
@@ -234,8 +244,9 @@ def main():
     parser.add_argument("--multipv", type=int, default=1, help="MultiPV value sent to each engine.")
     parser.add_argument("--setoption1", action="append", default=[], help="Additional setoption payload for engine 1. Example: 'MinimumThinkingTime value 0'")
     parser.add_argument("--setoption2", action="append", default=[], help="Additional setoption payload for engine 2. Example: 'MinimumThinkingTime value 0'")
-    parser.add_argument("--limit", type=int, default=0, help="Maximum number of positions to evaluate. 0 means all.")
+    parser.add_argument("--limit", type=int, default=0, help="Maximum number of positions to evaluate after random sampling. 0 means all.")
     parser.add_argument("--skip", type=int, default=0, help="Number of initial positions to skip.")
+    parser.add_argument("--sample_seed", type=int, default=42, help="Random seed used when sampling positions for --limit.")
     parser.add_argument("--output", type=str, default="", help="Optional JSONL output path.")
     parser.add_argument("--startup_timeout", type=float, default=30.0, help="Timeout in seconds for USI startup and readyok.")
     parser.add_argument("--think_timeout", type=float, default=120.0, help="Timeout in seconds for each position analysis.")
@@ -252,11 +263,12 @@ def main():
     binary1, eval_dir1 = resolve_engine_binary_and_eval(home, config["engine1"], config["eval1"])
     binary2, eval_dir2 = resolve_engine_binary_and_eval(home, config["engine2"], config["eval2"])
     positions = load_book_positions(home, config["positions"], config["book_moves"])
-
-    if config["skip"]:
-        positions = positions[config["skip"]:]
-    if config["limit"] > 0:
-        positions = positions[:config["limit"]]
+    positions = select_positions(
+        positions,
+        config["skip"],
+        config["limit"],
+        config["sample_seed"],
+    )
     if not positions:
         print("Error: No positions to evaluate after applying skip/limit.", file=sys.stderr)
         sys.exit(1)
@@ -352,6 +364,7 @@ def main():
     print()
     print("Summary")
     print(f"positions          : {len(positions)}")
+    print(f"sample_seed        : {config['sample_seed']}")
     print(f"comparable_scores  : {comparable}")
     print(f"avg_delta          : {safe_mean(deltas):.2f}" if comparable else "avg_delta          : -")
     print(f"avg_abs_delta      : {safe_mean(abs_deltas):.2f}" if comparable else "avg_abs_delta      : -")
