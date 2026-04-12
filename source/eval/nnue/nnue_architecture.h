@@ -32,6 +32,16 @@
 // halfkpe9型
 #include "architectures/halfkpe9_256x2-32-32.h"
 
+#elif defined(YANEURAOU_ENGINE_NNUE_MOE4_HALFKP_256X2_32_32)
+
+// MoE 4 expert halfkp_256x2-32-32型
+#include "architectures/halfkp_256x2-32-32-moe4.h"
+
+#elif defined(YANEURAOU_ENGINE_NNUE_MOE8_HALFKP_256X2_32_32)
+
+// MoE 8 expert halfkp_256x2-32-32型
+#include "architectures/halfkp_256x2-32-32-moe8.h"
+
 #elif defined(YANEURAOU_ENGINE_NNUE_HALFKP_512X2_16_32)
 
 // halfkp_512x2-16-32型
