@@ -285,7 +285,7 @@ namespace {
 			return;
 		}
 
-		ofs << "index,sfen,orig_score,engine_score,ply,result\n";
+		ofs << "index,sfen,orig_score,engine_score,score_diff,abs_score_diff,ply,result\n";
 
 		Learner::PackedSfenValue psv;
 		uint64_t index = 0;
@@ -305,6 +305,8 @@ namespace {
 			const auto sfen = pos.sfen();
 			const auto engine_score = static_cast<int>(Eval::evaluate(pos));
 			const auto orig_score = static_cast<int>(psv.score);
+			const auto score_diff = engine_score - orig_score;
+			const auto abs_score_diff = score_diff >= 0 ? score_diff : -score_diff;
 			const auto ply = static_cast<unsigned>(psv.gamePly);
 			const auto game_result = static_cast<int>(psv.game_result);
 
@@ -312,6 +314,8 @@ namespace {
 				<< "," << csv_quote(sfen)
 				<< "," << orig_score
 				<< "," << engine_score
+				<< "," << score_diff
+				<< "," << abs_score_diff
 				<< "," << ply
 				<< "," << game_result
 				<< "\n";
