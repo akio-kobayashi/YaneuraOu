@@ -6,12 +6,14 @@
 //      通常のtestコマンド
 // ----------------------------------
 
+#include <fstream>
 #include <sstream>
 #include "../position.h"
 #include "../usi.h"
 #include "../thread.h"
 #include "../search.h"
 #include "../movegen.h"
+#include "../learn/learn.h"
 
 #if defined(EVAL_LEARN)
 #include "../eval/evaluate_common.h"
@@ -19,6 +21,17 @@
 
 namespace YaneuraOu {
 namespace {
+
+	std::string csv_quote(std::string s)
+	{
+		size_t pos = 0;
+		while ((pos = s.find('"', pos)) != std::string::npos)
+		{
+			s.insert(pos, 1, '"');
+			pos += 2;
+		}
+		return "\"" + s + "\"";
+	}
 
 	// "test genmoves" : 指し手生成テストコマンド
 	// positionコマンドで設定されている現在の局面から。
@@ -231,6 +244,97 @@ namespace {
 				std::cout << result;
 		}
 	}
+
+#if defined(EVAL_LEARN) && defined(USE_SFEN_PACKER)
+	void eval_bin(IEngine& engine, std::istringstream& is)
+	{
+		auto& pos = engine.get_position();
+
+		std::string input_path;
+		std::string output_path;
+		uint64_t count = 0;
+
+		std::string token;
+		while (is >> token)
+		{
+			if (token == "input")
+				is >> input_path;
+			else if (token == "output")
+				is >> output_path;
+			else if (token == "count")
+				is >> count;
+		}
+
+		if (input_path.empty() || output_path.empty())
+		{
+			std::cout << "usage: test evalbin input <psv.bin> output <out.csv> [count N]" << std::endl;
+			return;
+		}
+
+		std::ifstream ifs(input_path, std::ios::binary);
+		if (!ifs)
+		{
+			std::cout << "Error! : can't open input file : " << input_path << std::endl;
+			return;
+		}
+
+		std::ofstream ofs(output_path);
+		if (!ofs)
+		{
+			std::cout << "Error! : can't open output file : " << output_path << std::endl;
+			return;
+		}
+
+		ofs << "index,sfen,orig_score,engine_score,ply,result\n";
+
+		Learner::PackedSfenValue psv;
+		uint64_t index = 0;
+		uint64_t written = 0;
+
+		while ((!count || index < count) && ifs.read(reinterpret_cast<char*>(&psv), sizeof(psv)))
+		{
+			StateInfo si;
+			auto result = pos.set_from_packed_sfen(psv.sfen, &si, false, psv.gamePly);
+			if (result.is_not_ok())
+			{
+				std::cout << "Error! : failed to decode record " << index
+						  << " : " << result.to_string() << std::endl;
+				return;
+			}
+
+			const auto sfen = pos.sfen();
+			const auto engine_score = static_cast<int>(Eval::evaluate(pos));
+			const auto orig_score = static_cast<int>(psv.score);
+			const auto ply = static_cast<unsigned>(psv.gamePly);
+			const auto game_result = static_cast<int>(psv.game_result);
+
+			ofs << index
+				<< "," << csv_quote(sfen)
+				<< "," << orig_score
+				<< "," << engine_score
+				<< "," << ply
+				<< "," << game_result
+				<< "\n";
+			++index;
+			++written;
+		}
+
+		if (!ifs.eof() && ifs.fail())
+		{
+			std::cout << "Error! : failed while reading input file : " << input_path << std::endl;
+			return;
+		}
+
+		std::cout << "evalbin done : input = " << input_path
+				  << " , output = " << output_path
+				  << " , rows = " << written << std::endl;
+	}
+#else
+	void eval_bin([[maybe_unused]] IEngine& engine, [[maybe_unused]] std::istringstream& is)
+	{
+		std::cout << "Error! : test evalbin requires EVAL_LEARN and USE_SFEN_PACKER." << std::endl;
+	}
+#endif
 } // namespace
 
 // ----------------------------------
@@ -244,6 +348,7 @@ namespace Test
 	{
 		if (token == "genmoves")         gen_moves(engine, is);       // 現在の局面に対して指し手生成のテストを行う。
 		else if (token == "autoplay")    auto_play(engine, is);       // 連続自己対局を行う。
+		else if (token == "evalbin")     eval_bin(engine, is);        // PackedSfenValue .bin を評価して CSV に出力する。
 		else return false;									          // どのコマンドも処理することがなかった
 			
 		// いずれかのコマンドを処理した。
