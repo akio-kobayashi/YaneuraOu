@@ -13,14 +13,28 @@
 #include "../thread.h"
 #include "../search.h"
 #include "../movegen.h"
-#include "../learn/learn.h"
 
 #if defined(EVAL_LEARN)
+#include "../learn/learn.h"
 #include "../eval/evaluate_common.h"
 #endif
 
 namespace YaneuraOu {
 namespace {
+
+#if defined(USE_SFEN_PACKER)
+	struct PackedSfenValueForEvalBin
+	{
+		PackedSfen sfen;
+		s16 score;
+		u16 move;
+		u16 gamePly;
+		s8 game_result;
+		u8 padding;
+	};
+
+	static_assert(sizeof(PackedSfenValueForEvalBin) == 40, "PackedSfenValueForEvalBin must be 40 bytes");
+#endif
 
 	std::string csv_quote(std::string s)
 	{
@@ -245,7 +259,7 @@ namespace {
 		}
 	}
 
-#if defined(EVAL_LEARN) && defined(USE_SFEN_PACKER)
+#if defined(USE_SFEN_PACKER)
 	void eval_bin(IEngine& engine, std::istringstream& is)
 	{
 		auto& pos = engine.get_position();
@@ -287,7 +301,7 @@ namespace {
 
 		ofs << "index,sfen,orig_score,engine_score,score_diff,abs_score_diff,ply,result\n";
 
-		Learner::PackedSfenValue psv;
+		PackedSfenValueForEvalBin psv;
 		uint64_t index = 0;
 		uint64_t written = 0;
 
@@ -336,7 +350,7 @@ namespace {
 #else
 	void eval_bin([[maybe_unused]] IEngine& engine, [[maybe_unused]] std::istringstream& is)
 	{
-		std::cout << "Error! : test evalbin requires EVAL_LEARN and USE_SFEN_PACKER." << std::endl;
+		std::cout << "Error! : test evalbin requires USE_SFEN_PACKER." << std::endl;
 	}
 #endif
 } // namespace
