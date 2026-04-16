@@ -34,6 +34,128 @@ class GameResult(Enum):
 
 MAX_MOVES = 256
 
+
+def parse_book_line(line, book_moves):
+	parts = line.strip().split()
+	if not parts:
+		return None
+
+	if parts[0] == "startpos":
+		move_tokens = []
+		if len(parts) >= 2 and parts[1] == "moves":
+			move_tokens = parts[2:]
+		if book_moves > 0:
+			move_tokens = move_tokens[:book_moves]
+		record_line = "startpos"
+		if move_tokens:
+			record_line += " moves " + " ".join(move_tokens)
+		return {
+			"position_command": "position " + record_line,
+			"record_line": record_line,
+			"initial_move_count": len(move_tokens),
+			"side_to_move": len(move_tokens) & 1,
+		}
+
+	if parts[0] == "sfen":
+		if len(parts) < 5 or parts[2] not in ("b", "w"):
+			return None
+		record_line = " ".join(parts[:5])
+		if len(parts) > 5:
+			if parts[5] != "moves":
+				return None
+			move_tokens = parts[6:]
+			if book_moves > 0:
+				move_tokens = move_tokens[:book_moves]
+			if move_tokens:
+				record_line += " moves " + " ".join(move_tokens)
+		return {
+			"position_command": "position " + record_line,
+			"record_line": record_line,
+			"initial_move_count": 0,
+			"side_to_move": 0 if parts[2] == "b" else 1,
+		}
+
+	return None
+
+
+def load_book_positions(home, book_file, book_moves):
+	if not book_file:
+		return [{
+			"position_command": "position startpos",
+			"record_line": "startpos",
+			"initial_move_count": 0,
+			"side_to_move": 0,
+		}]
+
+	book_path = book_file
+	if not os.path.isabs(book_path):
+		book_path = os.path.join(home, "book", book_file)
+
+	book_positions = []
+	with open(book_path, "r") as f:
+		for line_no, sfen in enumerate(f, start=1):
+			book_position = parse_book_line(sfen, book_moves)
+			if book_position is None:
+				print("Error! " + " in " + os.path.basename(book_path) + " line = " + str(line_no))
+			else:
+				book_positions.append(book_position)
+			if line_no % 100 == 0:
+				sys.stdout.write(".")
+				sys.stdout.flush()
+
+	if not book_positions:
+		raise ValueError(f"No valid opening positions found in {book_path}")
+
+	print()
+	return book_positions
+
+
+def resolve_engine_path(home, engine_path):
+	resolved_engine = engine_to_full(engine_path)
+	if os.path.isabs(resolved_engine):
+		return resolved_engine
+	return os.path.join(home, resolved_engine)
+
+
+def resolve_engine_binary_and_eval(home, engine, eval_dir):
+	resolved_engine = resolve_engine_path(home, engine)
+	engine_dir = resolved_engine if os.path.isdir(resolved_engine) else os.path.dirname(resolved_engine)
+
+	if os.path.isdir(resolved_engine):
+		candidates = [
+			os.path.join(resolved_engine, "YaneuraOu-native"),
+			os.path.join(resolved_engine, "YaneuraOu-by-gcc"),
+			os.path.join(resolved_engine, "YaneuraOu-apple_m2"),
+		]
+		binary_path = ""
+		for candidate in candidates:
+			if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+				binary_path = candidate
+				break
+		if not binary_path:
+			for entry in os.listdir(resolved_engine):
+				candidate = os.path.join(resolved_engine, entry)
+				if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+					binary_path = candidate
+					break
+		if not binary_path:
+			raise FileNotFoundError(f"No executable engine binary found under {resolved_engine}")
+	else:
+		binary_path = resolved_engine
+
+	if eval_dir:
+		if os.path.isabs(eval_dir):
+			resolved_eval_dir = eval_dir
+		else:
+			engine_local_eval = os.path.join(engine_dir, eval_dir)
+			legacy_eval = os.path.join(home, "eval", eval_dir)
+			resolved_eval_dir = engine_local_eval if os.path.exists(engine_local_eval) else legacy_eval
+	else:
+		default_engine_eval = os.path.join(engine_dir, "eval")
+		resolved_eval_dir = default_engine_eval if os.path.exists(default_engine_eval) else ""
+
+	return binary_path, resolved_eval_dir
+
 # ======================================================================
 # グローバル変数
 # ======================================================================
@@ -68,7 +190,13 @@ def output_rating(win,draw,lose,win_black,win_white,opt2):
 
 
 # 思考エンジンに対するオプションを生成する。
-def create_option(engines,engine_threads,evals,times,hashes,PARAMETERS_LOG_FILE_PATH):
+def create_option(engines,engine_threads,evals,times,hashes,multipv_or_param_log_path=1,PARAMETERS_LOG_FILE_PATH=""):
+
+	if isinstance(multipv_or_param_log_path, str):
+		multipv = 1
+		PARAMETERS_LOG_FILE_PATH = multipv_or_param_log_path
+	else:
+		multipv = multipv_or_param_log_path
 
 	# 思考エンジンに対するコマンド列を保存する。
 	options = []
@@ -122,8 +250,10 @@ def create_option(engines,engine_threads,evals,times,hashes,PARAMETERS_LOG_FILE_
 				option.append("go btime REST_TIME wtime REST_TIME byoyomi " + str(byoyomi))
 
 			option.append("setoption name Threads value " + str(engine_threads))
-			option.append("setoption name EvalDir value " + evals[i])
-			option.append("setoption name Hash value " + str(hashes[i]))
+			if evals[i]:
+				option.append("setoption name EvalDir value " + evals[i])
+			option.append("setoption name USI_Hash value " + str(hashes[i]))
+			option.append("setoption name MultiPV value " + str(multipv))
 			option.append("setoption name BookFile value no_book")
 			option.append("setoption name MinimumThinkingTime value 1000")
 			option.append("setoption name NetworkDelay value 0")
@@ -156,7 +286,9 @@ def create_option(engines,engine_threads,evals,times,hashes,PARAMETERS_LOG_FILE_
 
 			option.append("setoption name Threads value " + str(engine_threads))
 			option.append("setoption name USI_Hash value " + str(hashes[i]))
-#			option.append("setoption name EvalDir value " + evals[i])
+			option.append("setoption name MultiPV value " + str(multipv))
+			if evals[i]:
+				option.append("setoption name EvalDir value " + evals[i])
 
 			if "SILENT_MAJORITY" in engines[i]:
 				option.append("setoption name Byoyomi_Margin value 0")
@@ -194,7 +326,23 @@ def read_engine_output(engine_idx, proc, message_queue):
 #  book_sfens : 定跡
 #  opt2       : 勝敗の表示の先頭にT2,b2000 のように対局条件を文字列化して突っ込む用。
 #  book_moves : 定跡の手数
-def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_moves,kifu_format="sfen"):
+def vs_match(
+	engines_full,
+	options,
+	threads,
+	loop,
+	book_sfens,
+	fileLogging,
+	opt2,
+	book_moves,
+	save_candidates=False,
+	alt_move_prob=0.0,
+	alt_move_margin_cp=-1,
+	alt_move_temperature=12.0,
+	result_callback=None,
+	paired_openings=False,
+	kifu_format="sfen",
+):
 
 	win = lose = draw = 0
 	win_black = win_white = 0
@@ -208,6 +356,9 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 	# --- 状態変数の初期化 ---
 	# 対局ごとの状態
 	sfens = [""] * threads
+	initial_position_commands = ["position startpos"] * threads
+	initial_record_lines = ["startpos"] * threads
+	initial_side_to_move = [0] * threads
 	eval_values = [""] * threads
 	moves = [0] * threads
 	turns = [0] * threads
@@ -317,7 +468,7 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 	def go_cmd(i):
 		p = procs[i]
 		# USI "position"
-		s = "position startpos"
+		s = initial_position_commands[i//2]
 		if sfens[i//2] != "":
 			s += " moves " + sfens[i//2]
 		send_cmd(i,s)
@@ -336,10 +487,15 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 	def usinewgame_cmd(i,sfen_no):
 		p = procs[i]
 		send_cmd(i,"usinewgame")
-		sfens[i//2] = book_sfens[sfen_no]
+		book_position = book_sfens[sfen_no]
+		sfens[i//2] = ""
+		initial_position_commands[i//2] = book_position["position_command"]
+		initial_record_lines[i//2] = book_position["record_line"]
+		initial_side_to_move[i//2] = book_position["side_to_move"]
 		moves[i//2] = 0
 		# 定跡の評価値はよくわからんので0にしとくしかない。
-		eval_values[i//2] = "0 "*book_moves
+		initial_moves = book_position["initial_move_count"]
+		eval_values[i//2] = ("0 " * initial_moves) if initial_moves else ""
 
 	# ゲームオーバーのハンドラ
 	# i : engine index
@@ -453,7 +609,7 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 						sfen_no = (sfen_no + 1) % len(book_sfens)
 
 						# 先手→後手、交互に行う。
-						go_cmd((engine_idx & ~1) + turns[engine_idx//2])
+						go_cmd((engine_idx & ~1) + (turns[engine_idx//2] ^ initial_side_to_move[engine_idx//2]))
 
 				elif ("bestmove" in line) and (states[engine_idx] == EngineState.WAIT_FOR_BESTMOVE):
 					# node数計測用(60手目までのみ)
@@ -551,13 +707,19 @@ def vs_match(engines_full,options,threads,loop,book_sfens,fileLogging,opt2,book_
 							go_cmd(engine_idx^1) # 相手のエンジンにgoコマンドを送る
 				
 				if gameover != GameResult.NO_RESULT:
+					if result_callback is not None:
+						game_count = win + lose + draw
+						result_callback({
+							"result": gameover,
+							"pair_index": game_count // 2 if paired_openings else game_count,
+						})
 					gameover_cmd(engine_idx, gameover)
 					gameover_cmd(engine_idx^1, gameover)
 					if KifOutput:
 						if kifu_format == "csa":
 							write_csa_game(engine_idx//2, gameover)
 						else:
-							kif_file.write("startpos moves " + sfens[engine_idx//2] + "\n")
+							kif_file.write(initial_record_lines[engine_idx//2] + (" moves " + sfens[engine_idx//2] if sfens[engine_idx//2] else "") + "\n")
 							kif_file.write(eval_values[engine_idx//2] + "\n")
 					turns[engine_idx//2] = turns[engine_idx//2] ^ 1 # 手番を交代
 
