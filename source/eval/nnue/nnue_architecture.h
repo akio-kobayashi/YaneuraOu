@@ -62,6 +62,21 @@
 // halfkp_1024x2-8-64型
 #include "architectures/halfkp_1024x2-8-64.h"
 
+#elif defined(YANEURAOU_ENGINE_NNUE_HALFKP_768X2_16_64)
+
+// halfkp_768x2-16-64型
+#include "architectures/halfkp_768x2-16-64.h"
+
+#elif defined(YANEURAOU_ENGINE_NNUE_MOE3_HALFKP_768X2_16_64)
+
+// MoE 3 expert halfkp_768x2-16-64型
+#include "architectures/halfkp_768x2-16-64-moe3.h"
+
+#elif defined(YANEURAOU_ENGINE_NNUE_MOE4_HALFKP_768X2_16_64)
+
+// MoE 4 expert halfkp_768x2-16-64型
+#include "architectures/halfkp_768x2-16-64-moe4.h"
+
 #elif defined(YANEURAOU_ENGINE_NNUE_SFNNwoP1536)
 
 // SFNN without Psqt 1536型
