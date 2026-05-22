@@ -115,11 +115,22 @@ def choose_move_from_candidates(bestmove_line, candidate_info_map, alt_move_prob
 		return None
 
 	bestmove = parts[1]
+
+	# Extract multipv from bestmove line (e.g., "bestmove c7c8 multipv 2")
+	selected_multipv_from_bestmove = 1
+	for i, part in enumerate(parts):
+		if part == "multipv" and i + 1 < len(parts):
+			try:
+				selected_multipv_from_bestmove = int(parts[i + 1])
+			except ValueError:
+				pass
+		break  # multipv appears only once after bestmove
+
 	if alt_move_prob <= 0.0 or alt_move_margin_cp < 0:
 		return {
 			"move": bestmove,
 			"source": "bestmove",
-			"selected_multipv": 1,
+			"selected_multipv": selected_multipv_from_bestmove,
 		}
 
 	top_candidate = candidate_info_map.get(1)
@@ -127,7 +138,7 @@ def choose_move_from_candidates(bestmove_line, candidate_info_map, alt_move_prob
 		return {
 			"move": bestmove,
 			"source": "bestmove",
-			"selected_multipv": 1,
+			"selected_multipv": selected_multipv_from_bestmove,
 		}
 
 	top_score = top_candidate["score"]
@@ -146,7 +157,7 @@ def choose_move_from_candidates(bestmove_line, candidate_info_map, alt_move_prob
 		return {
 			"move": bestmove,
 			"source": "bestmove",
-			"selected_multipv": 1,
+			"selected_multipv": selected_multipv_from_bestmove,
 		}
 
 	weights = []
