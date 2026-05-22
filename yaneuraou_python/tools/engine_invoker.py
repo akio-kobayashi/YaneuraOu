@@ -124,7 +124,7 @@ def choose_move_from_candidates(bestmove_line, candidate_info_map, alt_move_prob
 				selected_multipv_from_bestmove = int(parts[i + 1])
 			except ValueError:
 				pass
-		break  # multipv appears only once after bestmove
+			break  # multipv appears only once after bestmove
 
 	if alt_move_prob <= 0.0 or alt_move_margin_cp < 0:
 		return {
@@ -310,6 +310,11 @@ def expand_eval_dirs(eval_dir):
 
 
 # 思考エンジンに対するオプションを生成する。
+def is_yaneuraou_compatible_engine(engine_path):
+	engine_name = os.path.basename(engine_path).lower()
+	return ("yane" in engine_name) or ("aobannue" in engine_name)
+
+
 def create_option(engines,engine_threads,evals,times,hashes,multipv,PARAMETERS_LOG_FILE_PATH):
 
 	# 思考エンジンに対するコマンド列を保存する。
@@ -356,7 +361,7 @@ def create_option(engines,engine_threads,evals,times,hashes,multipv,PARAMETERS_L
 				nodes_limit = t
 
 		option = []
-		if ("Yane" in engines[i]):
+		if is_yaneuraou_compatible_engine(engines[i]):
 			if rtime:
 				option.append("go rtime " + str(rtime))
 			elif inc_time:
@@ -392,11 +397,15 @@ def create_option(engines,engine_threads,evals,times,hashes,multipv,PARAMETERS_L
 				option.append("go btime REST_TIME wtime REST_TIME inc " + str(inc_time))
 			elif depth_time:
 				option.append("go depth " + str(depth_time))
+			elif nodes_limit:
+				option.append("go nodes " + str(nodes_limit))
 			else:
 				option.append("go btime REST_TIME wtime REST_TIME byoyomi " + str(byoyomi))
 
 			option.append("setoption name Threads value " + str(engine_threads))
 			option.append("setoption name USI_Hash value " + str(hashes[i]))
+			if multipv > 1:
+				option.append("setoption name MultiPV value " + str(multipv))
 #			option.append("setoption name EvalDir value " + evals[i])
 
 			if "SILENT_MAJORITY" in engines[i]:
