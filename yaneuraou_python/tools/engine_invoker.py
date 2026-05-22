@@ -141,7 +141,19 @@ def choose_move_from_candidates(bestmove_line, candidate_info_map, alt_move_prob
 			"selected_multipv": selected_multipv_from_bestmove,
 		}
 
-	top_score = top_candidate["score"]
+	cp_candidates = [
+		candidate
+		for candidate in candidate_info_map.values()
+		if candidate["score_type"] == "cp" and candidate["pv"]
+	]
+	if not cp_candidates:
+		return {
+			"move": bestmove,
+			"source": "bestmove",
+			"selected_multipv": selected_multipv_from_bestmove,
+		}
+
+	top_score = max(candidate["score"] for candidate in cp_candidates)
 	eligible_alternatives = []
 	for key in sorted(candidate_info_map.keys()):
 		if key <= 1:
@@ -160,10 +172,11 @@ def choose_move_from_candidates(bestmove_line, candidate_info_map, alt_move_prob
 			"selected_multipv": selected_multipv_from_bestmove,
 		}
 
+	best_alternative_score = max(candidate["score"] for candidate in eligible_alternatives)
+	temperature = max(1.0, alt_move_temperature)
 	weights = []
 	for candidate in eligible_alternatives:
-		score_gap = top_score - candidate["score"]
-		weights.append(math.exp(-score_gap / max(1.0, alt_move_temperature)))
+		weights.append(math.exp((candidate["score"] - best_alternative_score) / temperature))
 
 	chosen = random.choices(eligible_alternatives, weights=weights, k=1)[0]
 	return {
@@ -315,6 +328,18 @@ def is_yaneuraou_compatible_engine(engine_path):
 	return ("yane" in engine_name) or ("aobannue" in engine_name)
 
 
+def usi_path_for_engine(engine_path, path):
+	if not path:
+		return path
+
+	engine_name = os.path.basename(engine_path).lower()
+	if engine_name.endswith(".exe") and path.startswith("/mnt/") and len(path) >= 7 and path[6] == "/":
+		drive = path[5].upper()
+		return drive + ":\\" + path[7:].replace("/", "\\")
+
+	return path
+
+
 def create_option(engines,engine_threads,evals,times,hashes,multipv,PARAMETERS_LOG_FILE_PATH):
 
 	# 思考エンジンに対するコマンド列を保存する。
@@ -374,7 +399,8 @@ def create_option(engines,engine_threads,evals,times,hashes,multipv,PARAMETERS_L
 				option.append("go btime REST_TIME wtime REST_TIME byoyomi " + str(byoyomi))
 
 			option.append("setoption name Threads value " + str(engine_threads))
-			option.append("setoption name EvalDir value " + evals[i])
+			if evals[i]:
+				option.append("setoption name EvalDir value " + usi_path_for_engine(engines[i], evals[i]))
 			option.append("setoption name USI_Hash value " + str(hashes[i]))
 			option.append("setoption name BookFile value no_book")
 			option.append("setoption name MultiPV value " + str(multipv))
@@ -1067,7 +1093,7 @@ def main():
 
 	engine1_full, eval1_full = resolve_engine_binary_and_eval(home, engine1_path, eval1_path)
 	engine2_full, eval2_full = resolve_engine_binary_and_eval(home, engine2_path, eval2_path)
-	evaldirs = expand_eval_dirs(eval2_full)
+	evaldirs = expand_eval_dirs(eval2_full) if eval2_path else [""]
 
 	print("home           : " , home)
 	print("play_time_list : " , play_time_list)
@@ -1102,8 +1128,8 @@ def main():
 
 		engines = ( engine1 , engine2 )
 		engines_full = engines
-		evals   = ( eval1_full if eval1_full else "(engine default)" , evaldir if evaldir else "(engine default)" )
-		evals_full   = ( eval1_full , evaldir )
+		evals   = ( eval1_full if eval1_path else "(engine default)" , evaldir if evaldir else "(engine default)" )
+		evals_full   = ( eval1_full if eval1_path else "" , evaldir )
 
 		for i in range(2):
 			print("engine" + str(i+1) + " = " + engines[i] + " , eval = " + evals[i])
