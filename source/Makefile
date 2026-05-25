@@ -299,7 +299,6 @@ else
 		endif
 	endif
 endif
-endif
 # リンク時最適化。
 # --- リンク時最適化 (LTO: Link Time Optimization) ---
 # 複数のソースファイルにまたがる最適化を可能にします。
@@ -374,7 +373,7 @@ ifneq (,$(findstring YANEURAOU_ENGINE_NNUE,$(YANEURAOU_EDITION)))
 endif
 
 CPPFLAGS += -DNO_EXCEPTIONS
-// LDFLAGS += -lpthread
+# LDFLAGS += -lpthread
 LDFLAGS += -v
 
 OBJDIR   = ../obj
