@@ -26,6 +26,7 @@
 # YANEURAOU_ENGINE_NNUE_HALFKPE9 : NNUE型評価関数(halfKPE9)
 # YANEURAOU_ENGINE_NNUE_HALFKP_512X2_16_32 : NNUE型評価関数(halfkp_512x2-16-32)
 # YANEURAOU_ENGINE_NNUE_HALFKP_768X2_16_64 : NNUE型評価関数(halfkp_768x2-16-64)
+# YANEURAOU_ENGINE_NNUE_HALFKPE9_768X2_16_64 : NNUE型評価関数(halfKPE9 768x2-16-64)
 # YANEURAOU_ENGINE_NNUE_HALFKP_1024X2_8_32 : NNUE型評価関数(halfkp_1024x2-8-32)
 # YANEURAOU_ENGINE_NNUE_HALFKP_1024X2_8_64 : NNUE型評価関数(halfkp_1024x2-8-64)
 # YANEURAOU_ENGINE_NNUE_HALFKP_VM_256X2_32_32 : NNUE型評価関数(halfkp_vm_256x2-32-32)
@@ -271,24 +272,34 @@ TARGETDIR = .
 ifneq (,$(findstring em++,$(COMPILER)))
 	TARGET = $(TARGETDIR)/yaneuraou.js
 else
-	ifeq ($(OS),Windows_NT)
+	IS_MINGW = $(findstring mingw,$(COMPILER))
+	ifneq (,$(IS_MINGW))
+		# ===  MingGW64 用 (Windowsクロスビルド)  ===
 		CPPFLAGS += $(WCPPFLAGS)
 		LDFLAGS += -static -Wl,--stack,25000000
 		TARGET = $(TARGETDIR)/YaneuraOu-by-gcc.exe
+		CPPFLAGS += -D_WIN32 -D_WIN64
+		LDFLAGS += -lwsock32 -lws2_32 -lstdc++ -lwinpthread
 	else
-		CPPFLAGS += -D_LINUX
-		ifeq ($(filter APPLESILICON APPLEM1,$(TARGET_CPU)),$(TARGET_CPU))
-			ifeq ($(strip $(APPLE_CPU)),)
-				TARGET = $(TARGETDIR)/YaneuraOu-native$(EDITION_TARGET_SUFFIX)
-			else
-				TARGET = $(TARGETDIR)/YaneuraOu-native-$(patsubst apple-%,%,$(APPLE_CPU))$(EDITION_TARGET_SUFFIX)
-			endif
+		ifeq ($(OS),Windows_NT)
+			CPPFLAGS += $(WCPPFLAGS)
+			LDFLAGS += -static -Wl,--stack,25000000
+			TARGET = $(TARGETDIR)/YaneuraOu-by-gcc.exe
 		else
-			TARGET = $(TARGETDIR)/YaneuraOu-by-gcc
+			CPPFLAGS += -D_LINUX
+			ifeq ($(filter APPLESILICON APPLEM1,$(TARGET_CPU)),$(TARGET_CPU))
+				ifeq ($(strip $(APPLE_CPU)),)
+					TARGET = $(TARGETDIR)/YaneuraOu-native$(EDITION_TARGET_SUFFIX)
+				else
+					TARGET = $(TARGETDIR)/YaneuraOu-native-$(patsubst apple-%,%,$(APPLE_CPU))$(EDITION_TARGET_SUFFIX)
+				endif
+			else
+				TARGET = $(TARGETDIR)/YaneuraOu-by-gcc
+			endif
 		endif
 	endif
 endif
-
+endif
 # リンク時最適化。
 # --- リンク時最適化 (LTO: Link Time Optimization) ---
 # 複数のソースファイルにまたがる最適化を可能にします。
@@ -363,7 +374,7 @@ ifneq (,$(findstring YANEURAOU_ENGINE_NNUE,$(YANEURAOU_EDITION)))
 endif
 
 CPPFLAGS += -DNO_EXCEPTIONS
-LDFLAGS += -lpthread
+// LDFLAGS += -lpthread
 LDFLAGS += -v
 
 OBJDIR   = ../obj
@@ -528,6 +539,9 @@ ifneq (,$(findstring YANEURAOU_ENGINE_NNUE,$(YANEURAOU_EDITION)))
 
 		else ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_NNUE_HALFKP_768X2_16_64)
 			CPPFLAGS += -DYANEURAOU_ENGINE_NNUE_HALFKP_768X2_16_64
+
+		else ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_NNUE_HALFKPE9_768X2_16_64)
+			CPPFLAGS += -DEVAL_NNUE_HALFKPE9_768X2_16_64
 
 		else ifeq ($(YANEURAOU_EDITION),YANEURAOU_ENGINE_NNUE_HALFKP_1024X2_8_32)
 			CPPFLAGS += -DEVAL_NNUE_HALFKP_1024X2_8_32
