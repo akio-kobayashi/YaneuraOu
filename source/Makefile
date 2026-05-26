@@ -63,7 +63,8 @@
 #                                  ビルドを確認したDocker image → nvcr.io/nvidia/tensorrt:22.12-py3
 
 
-YANEURAOU_EDITION = YANEURAOU_ENGINE_NNUE
+#YANEURAOU_EDITION = YANEURAOU_ENGINE_NNUE
+YANEURAOU_EDITION = YANEURAOU_ENGINE_NNUE_HALFKP_768X2_16_64
 #YANEURAOU_EDITION = YANEURAOU_ENGINE_NNUE_KP256
 #YANEURAOU_EDITION = YANEURAOU_ENGINE_NNUE_HALFKPE9
 #YANEURAOU_EDITION = YANEURAOU_ENGINE_NNUE_HALFKP_512X2_16_32
@@ -88,7 +89,7 @@ ifneq (,$(findstring YANEURAOU_ENGINE_NNUE,$(YANEURAOU_EDITION)))
 	endif
 endif
 
-BUILD_FLAVOR_SUFFIX = -layerstack
+
 
 # ターゲットCPU (target cpu)
 
@@ -111,7 +112,7 @@ BUILD_FLAVOR_SUFFIX = -layerstack
 #TARGET_CPU = AVX512VNNI
 #TARGET_CPU = AVX512
 #TARGET_CPU = AVXVNNI
-TARGET_CPU = AVX2
+#TARGET_CPU = AVX2
 #TARGET_CPU = SSE42
 #TARGET_CPU = SSE41
 #TARGET_CPU = SSSE3
@@ -121,6 +122,7 @@ TARGET_CPU = AVX2
 #TARGET_CPU = ZEN1
 #TARGET_CPU = ZEN2
 #TARGET_CPU = ZEN3
+TARGET_CPU = ZEN5
 # -- ARMとか
 #TARGET_CPU = OTHER
 #TARGET_CPU = GRAVITON2
@@ -141,7 +143,7 @@ DEBUG = OFF
 # 使用するコンパイラ (compiler)
 # ※ clangでコンパイルしたほうがgccより数%速いっぽい。
 #COMPILER = g++
-COMPILER = clang++
+COMPILER = x86_64-w64-mingw32-g++
 #COMPILER = em++
 
 # Python
@@ -646,6 +648,9 @@ else ifeq ($(TARGET_CPU),ZEN2)
 
 else ifeq ($(TARGET_CPU),ZEN3)
 	CPPFLAGS += -DUSE_AVX2 -DUSE_BMI2 -mbmi -mbmi2 -mavx2 -march=znver3
+
+else ifeq ($(TARGET_CPU),ZEN5)
+	CPPFLAGS += -DUSE_AVX512 -DUSE_BMI2 -DUSE_VNNI -mbmi -mbmi2 -mavx512f -mavx512bw -mavx512dq -mavx512vl -mavx512vnni -march=znver4
 
 # それ以外は、AVX512,AVX2,SSE4.2,SSE4.1,SSE2のように利用できるCPU拡張命令で振り分ける。
 # AVX2より上位のCPUなら普通は(Intel系なら)BMI2命令を使ったほうが速いので"USE_BMI2"を指定しておく。

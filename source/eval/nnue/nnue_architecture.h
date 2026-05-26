@@ -32,6 +32,16 @@
 // halfkpe9型
 #include "architectures/halfkpe9_256x2-32-32.h"
 
+#elif defined(EVAL_NNUE_HALFKP_768X2_16_64)
+
+// halfKP_768x2-16_64型
+#include "architectures/HALFKP_768X2_16_64.h"
+
+#elif defined(YANEURAOU_ENGINE_NNUE_HALFKP_768X2_16_64)
+
+// halfkp_768x2-16_64型
+#include "architectures/HALFKP_768X2_16_64.h"
+
 #elif defined(YANEURAOU_ENGINE_NNUE_HALFKP_512X2_16_32)
 
 // halfkp_512x2-16-32型
