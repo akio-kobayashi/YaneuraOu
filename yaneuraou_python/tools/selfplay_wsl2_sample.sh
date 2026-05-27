@@ -43,8 +43,20 @@ TIME_CONTROL="d12"
 BOOK_MOVES=24
 RAND_BOOK="--rand_book"
 
-# Kifu output format: sfen or csa
-KIFU_FORMAT="csa"
+# MultiPV / candidate move sampling:
+#   MULTIPV=1            : best move only
+#   MULTIPV>1            : request that many MultiPV candidates
+#   ALT_MOVE_PROB=0.0    : always use best move
+#   ALT_MOVE_PROB>0.0    : occasionally sample a non-best candidate
+#   ALT_MOVE_MARGIN_CP<0 : disable alternative move selection
+#   ALT_MOVE_TEMPERATURE : larger => flatter sampling among alternatives
+MULTIPV=1
+ALT_MOVE_PROB=0.0
+ALT_MOVE_MARGIN_CP=-1
+ALT_MOVE_TEMPERATURE=12.0
+
+# Kifu output:
+#   engine_invoker.py currently saves self-play records as .sfen only.
 
 # Optional logging flags
 LOG_FLAG="--log"
@@ -59,7 +71,10 @@ ARGS=(
   --loop "${TOTAL_GAMES}"
   --time "${TIME_CONTROL}"
   --book_moves "${BOOK_MOVES}"
-  --kifu_format "${KIFU_FORMAT}"
+  --multipv "${MULTIPV}"
+  --alt_move_prob "${ALT_MOVE_PROB}"
+  --alt_move_margin_cp "${ALT_MOVE_MARGIN_CP}"
+  --alt_move_temperature "${ALT_MOVE_TEMPERATURE}"
 )
 
 if [[ -n "${EVAL_DIR}" ]]; then
